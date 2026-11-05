@@ -41,6 +41,24 @@ function weighingTable(result: CalculationResult) {
   </tbody></table><h3>Pengujian beban</h3><table><thead><tr><th>Beban nominal (kg)</th><th>Anak timbangan</th><th>Bacaan nol (kg)</th><th>Bacaan berbeban (kg)</th><th>Massa konvensional (kg)</th><th>Koreksi (kg)</th><th>U95 (kg)</th></tr></thead><tbody>${loadRows}</tbody></table>`;
 }
 
+function sphygmomanometerTable(result: CalculationResult) {
+  const sphyg = result.sphygmomanometer;
+  if (!sphyg) return '';
+  const outcome = (pass: boolean | null) => pass === null ? 'BELUM LENGKAP' : pass ? 'LULUS' : 'TIDAK LULUS';
+  const rows = sphyg.pressureReadings.flatMap((point) => (['up', 'down'] as const).map((direction) => {
+    const item = point[direction];
+    return `<tr><td>${point.setting} mmHg · ${direction === 'up' ? 'Naik' : 'Turun'}</td>
+      <td>${escapeHtml(item.readings.map((value) => fixed(value)).join(' / '))}</td>
+      <td>${escapeHtml(item.correctedReadings.map((value) => fixed(value)).join(' / '))}</td>
+      <td>${fixed(item.mean)}</td><td>${fixed(item.correction)}</td><td>${fixed(item.uncertaintyU95)}</td>
+      <td>${fixed(item.decisionValue)} / 4 mmHg</td><td>${outcome(item.pass)}</td></tr>`;
+  })).join('');
+  return `<table><tbody>
+    <tr><th>Uji kebocoran · penurunan tekanan</th><td>${fixed(sphyg.leakageDrop.value)} mmHg / batas 15 mmHg · ${outcome(sphyg.leakageDrop.pass)}</td></tr>
+    <tr><th>Deflasi cepat</th><td>${fixed(sphyg.rapidDeflationSeconds.value)} detik / batas 10 detik · ${outcome(sphyg.rapidDeflationSeconds.pass)}</td></tr>
+  </tbody></table><table><thead><tr><th>Titik / arah</th><th>Bacaan DPM</th><th>Bacaan terkoreksi</th><th>Rata-rata</th><th>Koreksi C</th><th>U95</th><th>|C| + U95 / batas</th><th>Hasil</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function environmentTable(result: CalculationResult) {
   const temp = result.environment.temperature;
   const humidity = result.environment.humidity;
@@ -90,14 +108,15 @@ export function buildDocumentHtml(record: CalibrationRecord, instrument: Instrum
   const identityRows = [
     row('Nama alat', instrument.name), row('Nomor dokumen', identity.documentNumber), row('Nomor label', identity.labelNumber),
     row('Merek', identity.brand), row('Tipe / model', identity.model), row('Nomor seri', identity.serial),
-    row('Kapasitas', identity.capacity), row('Tingkat ketelitian', identity.accuracy), row('Pelanggan', identity.customer),
+    row('Kapasitas', instrument.sphygmomanometer ? `${identity.capacity} mmHg` : identity.capacity),
+    row(instrument.sphygmomanometer ? 'Kelas akurasi' : 'Tingkat ketelitian', identity.accuracy), row('Pelanggan', identity.customer),
     row('Alamat', [identity.address, identity.city].filter(Boolean).join(', ')), row('Petugas', identity.technician),
     row('Ruang pelaksanaan', identity.room), row('Tanggal penerimaan', identity.receivedDate), row('Tanggal pelaksanaan', identity.testDate), row('Tanggal terbit', identity.issueDate),
   ].join('');
   const resultBlock = `<h2>Pengukuran kondisi lingkungan</h2>${environmentTable(result)}
     <h2>Standar kalibrasi yang digunakan</h2>${standardsTable(record, instrument)}
     <h2>Pemeriksaan fisik dan fungsi</h2>${inspectionTable(result)}${safetyTable(result)}
-    <h2>Pengujian kinerja</h2>${result.weighing ? weighingTable(result) : performanceTable(result)}
+    <h2>Pengujian kinerja</h2>${result.sphygmomanometer ? sphygmomanometerTable(result) : result.weighing ? weighingTable(result) : performanceTable(result)}
     <div class="outcome"><strong>Jumlah skor</strong><span>${result.score}/100</span><b>${escapeHtml(result.status)}</b></div>`;
   const certificateFields = certificate
     ? `<div class="certificate"><p>Dengan ini dinyatakan hasil pengujian/kalibrasi untuk alat di atas adalah:</p>

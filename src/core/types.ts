@@ -53,6 +53,33 @@ export interface WeighingScaleConfig {
   points: WeighingTestPoint[];
 }
 
+export interface SphygmomanometerPoint {
+  pressure: number;
+  up: number;
+  down: number;
+}
+
+export interface SphygmomanometerConfig {
+  capacityMmHg: number;
+  accuracyClass: number;
+  pressurePoints: number[];
+  dpmCorrections: SphygmomanometerPoint[];
+  dpmU95: number;
+  drift: SphygmomanometerPoint[];
+}
+
+export interface SphygmomanometerPressureInput {
+  setting: number;
+  up: string[];
+  down: string[];
+}
+
+export interface SphygmomanometerData {
+  leakageDrop: string;
+  rapidDeflationSeconds: string;
+  pressureReadings: SphygmomanometerPressureInput[];
+}
+
 export interface PerformanceSetting {
   id: string;
   label: string;
@@ -75,6 +102,7 @@ export interface Instrument {
   references: MeasurementReferences;
   score: InstrumentScore;
   weighingScale?: WeighingScaleConfig;
+  sphygmomanometer?: SphygmomanometerConfig;
 }
 
 export interface IdentityData {
@@ -154,6 +182,7 @@ export interface CalibrationData {
   inspections: InspectionEntry[];
   performance: PerformanceEntry[];
   weighing?: WeighingData;
+  sphygmomanometer?: SphygmomanometerData;
   safety: SafetyData;
 }
 
@@ -242,6 +271,31 @@ export interface WeighingResult {
   complete: boolean;
 }
 
+export interface SphygmomanometerDirectionResult {
+  readings: (number | null)[];
+  correctedReadings: (number | null)[];
+  mean: number | null;
+  standardDeviation: number | null;
+  correction: number | null;
+  uncertaintyU95: number | null;
+  decisionValue: number | null;
+  complete: boolean;
+  pass: boolean | null;
+}
+
+export interface SphygmomanometerPressureResult {
+  setting: number;
+  up: SphygmomanometerDirectionResult;
+  down: SphygmomanometerDirectionResult;
+}
+
+export interface SphygmomanometerResult {
+  leakageDrop: { value: number | null; pass: boolean | null };
+  rapidDeflationSeconds: { value: number | null; pass: boolean | null };
+  pressureReadings: SphygmomanometerPressureResult[];
+  complete: boolean;
+}
+
 export interface InspectionResult extends InspectionEntry {
   complete: boolean;
   passed: boolean;
@@ -269,6 +323,7 @@ export interface CalculationResult {
   performanceRate: number | null;
   performanceScore: number | null;
   weighing: WeighingResult | null;
+  sphygmomanometer: SphygmomanometerResult | null;
   safety: SafetyResult | null;
   safetyScore: number | null;
   score: number | null;

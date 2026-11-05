@@ -8,6 +8,17 @@ import { adultScaleDigital, adultScaleMechanical, adultScaleStandards } from './
 
 const readings = (count: number): string[] => Array.from({ length: count }, () => '');
 const points = (values: [number, number][]): ThermohygrometerPoint[] => values.map(([value, correction]) => ({ value, correction }));
+const sphygmomanometerInspectionItems = [
+  'Badan / permukaan', 'Balon tensi, tabung, dan selang', 'Bantalan / rem', 'Filter air raksa',
+  'Gauge / tabung aneroid', 'Indikator', 'Konektor', 'Label', 'Manset', 'Zeroing',
+  'Pengencang', 'Valve penutup',
+];
+const sphygmomanometerPressurePoints = [0, 50, 100, 150, 200, 250];
+const sphygmomanometerDrift = [
+  { pressure: 0, up: 0.02, down: 0.02 }, { pressure: 50, up: 0.52, down: 0.52 },
+  { pressure: 100, up: 0.52, down: 0.42 }, { pressure: 150, up: 0.61, down: 0.61 },
+  { pressure: 200, up: 0.61, down: 0.61 }, { pressure: 250, up: 0.71, down: 0.61 },
+];
 export const thermohygrometers: Thermohygrometer[] = [
   {
     id: 'EFG19BE02496',
@@ -136,6 +147,60 @@ export const instruments: Instrument[] = [
     score: { performanceThreshold: 70, performanceWeight: 90, physicalWeight: 10 },
     weighingScale: adultScaleMechanical,
   },
+  {
+    id: 'sphygmomanometer-analog',
+    name: 'Sphygmomanometer Analog',
+    subtitle: 'Analog · uji kebocoran, deflasi cepat, dan tekanan',
+    standards: [
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Stopwatch', 'Seiko', 'S23589P7', '740487'],
+      ['Digital Pressure Meter', 'Gossen Metrawatt', 'Seculife DP Pro', '732129100NNS081037'],
+    ],
+    inspectionItems: sphygmomanometerInspectionItems,
+    performanceRows: [],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 90, physicalWeight: 10 },
+    sphygmomanometer: {
+      capacityMmHg: 300,
+      accuracyClass: 2,
+      pressurePoints: sphygmomanometerPressurePoints,
+      dpmCorrections: [
+        { pressure: 0, up: -0.02, down: -0.02 }, { pressure: 50, up: -0.22, down: -0.22 },
+        { pressure: 100, up: -0.22, down: -0.22 }, { pressure: 150, up: -0.21, down: -0.21 },
+        { pressure: 200, up: -0.21, down: -0.21 }, { pressure: 250, up: -0.11, down: -0.11 },
+        { pressure: 300, up: -0.21, down: -0.21 },
+      ],
+      dpmU95: 0.15,
+      drift: sphygmomanometerDrift,
+    },
+  },
+  {
+    id: 'sphygmomanometer-digital',
+    name: 'Sphygmomanometer Digital',
+    subtitle: 'Digital · uji kebocoran, deflasi cepat, dan tekanan',
+    standards: [
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Stopwatch', 'Seiko', 'S23589P7', '740487'],
+      ['Digital Pressure Meter', 'Gossen Metrawatt', 'Seculife DP Pro', '732129100NNS081012'],
+    ],
+    inspectionItems: sphygmomanometerInspectionItems,
+    performanceRows: [],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 90, physicalWeight: 10 },
+    sphygmomanometer: {
+      capacityMmHg: 250,
+      accuracyClass: 1,
+      pressurePoints: sphygmomanometerPressurePoints,
+      dpmCorrections: [
+        { pressure: 0, up: 0, down: 0 }, { pressure: 50, up: 0, down: -0.3 },
+        { pressure: 100, up: -0.4, down: -0.5 }, { pressure: 150, up: -0.5, down: -0.5 },
+        { pressure: 200, up: -0.5, down: -0.6 }, { pressure: 250, up: -0.6, down: -0.7 },
+        { pressure: 300, up: -0.6, down: -0.7 },
+      ],
+      dpmU95: 0.4,
+      drift: sphygmomanometerDrift,
+    },
+  },
 ];
 
 export const getInstrument = (id: string): Instrument | undefined => instruments.find((instrument) => instrument.id === id);
@@ -148,8 +213,8 @@ export function createInitialData(instrumentId: string): CalibrationData {
   return {
     identity: {
       customerId: '', documentNumber: '', labelNumber: '', brand: '', model: '', serial: '',
-      capacity: instrument.weighingScale ? String(instrument.weighingScale.capacityKg) : '',
-      accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : '',
+      capacity: instrument.weighingScale ? String(instrument.weighingScale.capacityKg) : instrument.sphygmomanometer ? String(instrument.sphygmomanometer.capacityMmHg) : '',
+      accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : instrument.sphygmomanometer ? `Kelas ${instrument.sphygmomanometer.accuracyClass}` : '',
       technician: '', receivedDate: today, testDate: today, issueDate: '', room: '', customer: '', address: '', city: '', method: '',
     },
     environment: {
@@ -164,6 +229,11 @@ export function createInitialData(instrumentId: string): CalibrationData {
       repeatabilityReadings: Array.from({ length: 10 }, () => ({ zeroReading: '', indication: '' })),
       points: instrument.weighingScale.points.map(({ id }) => ({ id, zeroReading: '', indication: '', standardWeights: [] })),
       standardsInitialized: false,
+    } } : {}),
+    ...(instrument.sphygmomanometer ? { sphygmomanometer: {
+      leakageDrop: '',
+      rapidDeflationSeconds: '',
+      pressureReadings: instrument.sphygmomanometer.pressurePoints.map((setting) => ({ setting, up: readings(3), down: readings(3) })),
     } } : {}),
     safety: {
       voltage: '', earthType: '2', earthResistance: '',

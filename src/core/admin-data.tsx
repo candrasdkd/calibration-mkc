@@ -29,6 +29,8 @@ const demoDirectory: AdminDirectory = {
     { id: 'demo-device-1', name: 'Electrical Safety Analyzer', brand: 'Gossen Metrawatt', model: 'Seculife ST Pro', serial: 'FC7267170003', isThermohygrometer: false, certificate: null, isDemo: true },
     { id: 'demo-device-3', name: 'Tachometer', brand: 'Lutron', model: 'DT-1236L', serial: 'I. 52947', isThermohygrometer: false, certificate: null, isDemo: true },
     { id: 'demo-device-4', name: 'Stopwatch', brand: 'Seiko', model: 'S23589P7', serial: '740487', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-dpm-analog', name: 'Digital Pressure Meter', brand: 'Gossen Metrawatt', model: 'Seculife DP Pro', serial: '732129100NNS081037', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-dpm-digital', name: 'Digital Pressure Meter', brand: 'Gossen Metrawatt', model: 'Seculife DP Pro', serial: '732129100NNS081012', isThermohygrometer: false, certificate: null, isDemo: true },
     { id: 'demo-device-2', name: 'Thermohygrometer', brand: 'Elitech', model: 'GSP-6', serial: thermohygrometers[0].serial, isThermohygrometer: true, certificate: certificateFrom(thermohygrometers[0]), isDemo: true },
     ...thermohygrometers.slice(1).map((reference, index): MeasuringDevice => ({ id: `demo-device-thermo-${index + 2}`, name: 'Thermohygrometer', brand: 'Elitech', model: 'GSP-6', serial: reference.serial, isThermohygrometer: true, certificate: certificateFrom(reference), isDemo: true })),
     { id: 'demo-device-5', name: 'Vital Sign Simulator', brand: 'Gossen Metrawatt', model: 'Seculife BP Pro', serial: '735AE9911141', isThermohygrometer: false, certificate: null, isDemo: true },
@@ -46,7 +48,7 @@ const demoDirectory: AdminDirectory = {
     { id: 'demo-technician-2', name: 'Rafi Teknisi Demo', phone: '0812-0000-0012', isDemo: true },
   ],
   equipmentMethods: [],
-  seedVersion: 4,
+  seedVersion: 5,
 };
 
 export type AdminDataContextValue = AdminDirectory & {
@@ -103,6 +105,11 @@ function parseDirectory(value: unknown): AdminDirectory {
       if (!devices.some((item) => item.id === demoDevice.id)) devices.push(demoDevice);
     }
   }
+  if (!directory.seedVersion || directory.seedVersion < 5) {
+    for (const demoDevice of demoDirectory.devices.filter((item) => item.id.startsWith('demo-device-dpm-'))) {
+      if (!devices.some((item) => item.id === demoDevice.id || item.serial === demoDevice.serial)) devices.push(demoDevice);
+    }
+  }
   return {
     customers: directory.customers,
     devices,
@@ -110,7 +117,7 @@ function parseDirectory(value: unknown): AdminDirectory {
     equipmentMethods: Array.isArray(directory.equipmentMethods)
       ? directory.equipmentMethods.filter((entry): entry is EquipmentMethod => Boolean(entry && typeof entry.instrumentId === 'string' && typeof entry.method === 'string' && instruments.some((instrument) => instrument.id === entry.instrumentId)))
       : [],
-    seedVersion: 4,
+    seedVersion: 5,
   };
 }
 

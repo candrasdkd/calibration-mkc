@@ -22,6 +22,8 @@ import type {
   Instrument,
   SafetyResult,
   SelectedMeasurementDevice,
+  SphygmomanometerData,
+  SphygmomanometerDirectionResult,
   Thermohygrometer,
   WeighingStandardWeight,
 } from '../../../core/types';
@@ -86,10 +88,14 @@ function IdentityStep({ data, instrument, customers, loaded, update, selectCusto
   ];
   return <>
     <Card><Heading title="Alat yang dikalibrasi" hint="Isi identitas alat kesehatan yang diuji. Metode kerja otomatis mengikuti katalog kalibrasi." />
-      {fields.slice(0, instrument.weighingScale ? 4 : 6).map(([key, label]) => <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
+      {fields.slice(0, instrument.weighingScale || instrument.sphygmomanometer ? 4 : 6).map(([key, label]) => <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
       {instrument.weighingScale ? <>
         <ValueLine label="Kapasitas" value={`${instrument.weighingScale.capacityKg} kg`} />
         <ValueLine label="Tingkat ketelitian" value={`${instrument.weighingScale.resolutionKg} kg`} />
+      </> : null}
+      {instrument.sphygmomanometer ? <>
+        <ValueLine label="Kapasitas" value={`${instrument.sphygmomanometer.capacityMmHg} mmHg`} />
+        <ValueLine label="Kelas akurasi" value={`${instrument.sphygmomanometer.accuracyClass}`} />
       </> : null}
     </Card>
     <Card><Heading title="Pelaksanaan dan pelanggan" hint="Pilih pelanggan yang sudah didaftarkan admin. Ketuk tanggal untuk membuka kalender." />
@@ -154,6 +160,8 @@ function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onRefe
   const [weightSearch, setWeightSearch] = useState('');
   const selected = data.selectedDevices ?? [];
   const requirements = instrument.standards.map(([name]) => name);
+  const expectedDpmSerial = instrument.sphygmomanometer ? instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] : undefined;
+  const selectedDpm = selected.find((device) => device.name === 'Digital Pressure Meter');
   const availableDevices = loaded ? devices.filter((device) => !device.weighingStandard
     && requirements.some((name) => deviceNameKey(name) === deviceNameKey(device.name))) : [];
   const selectedIds = new Set(selected.map((device) => device.id));
@@ -184,6 +192,7 @@ function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onRefe
       <ValueLine label="Standar wajib" value={[...requirements, ...(weightPoints.length ? ['Anak timbangan per titik beban'] : [])].join(' · ')} />
       {!loaded ? <Text style={styles.deviceHint}>Memuat standar kalibrasi…</Text> : null}
       {loaded && requirements.some((name) => !availableDevices.some((device) => deviceNameKey(device.name) === deviceNameKey(name))) ? <Text style={styles.deviceHint}>Ada standar wajib yang belum terdaftar. Admin perlu menambahkannya dengan nama jenis yang sesuai di menu Standar kalibrasi.</Text> : null}
+      {expectedDpmSerial && selectedDpm && selectedDpm.serial !== expectedDpmSerial ? <Text style={styles.sourceWarning}>Kurva koreksi workbook hanya untuk DPM {expectedDpmSerial}. Pilihan {selectedDpm.serial} belum punya kurva di aplikasi.</Text> : null}
       <PickerField label="Standar umum" value={selected.length ? `${selected.length} standar dipilih` : ''} placeholder="Pilih standar yang dibutuhkan" disabled={!loaded || !availableDevices.length} onPress={() => { setSearch(''); setWeightPickerPointId(null); setPickerOpen(true); }} />
       {loaded && thermometers.length ? <Choice label="Thermohygrometer acuan kondisi lingkungan" value={thermometers.some(({ device }) => device.id === data.environment.standardId) ? data.environment.standardId : ''} options={thermometers.map(({ device }) => ({ value: device.id, label: device.serial }))} onChange={(id) => {
         const profile = thermometers.find(({ device }) => device.id === id)?.profile;
@@ -402,7 +411,72 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
   </>;
 }
 
-function MeasurementStep({ data, instrument, result, update, updateInspection, updatePerformance, updateWeighingPoint, updateWeighingRepeatability }: {
+function PressureDirectionInput({ setting, label, values, result, onChange }: {
+  setting: number;
+  label: string;
+  values: string[];
+  result: SphygmomanometerDirectionResult;
+  onChange: (index: number, value: string) => void;
+}) {
+  return <View style={styles.performanceCard}>
+    <View style={styles.performanceHeading}>
+      <Text style={styles.labelLike}>Tekanan {label}</Text>
+      <Badge text={result.pass === null ? 'MENUNGGU' : result.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.pass === null ? 'wait' : result.pass ? 'good' : 'bad'} />
+    </View>
+    <View style={styles.readingsGrid}>
+      {values.map((value, index) => <View key={index} style={styles.readingCell}>
+        <Text style={styles.readingLabel}>Bacaan DPM {index + 1}</Text>
+        <TextInput accessibilityLabel={`${setting} mmHg, ${label}, bacaan DPM ${index + 1}`} value={value} onChangeText={(next) => onChange(index, next)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
+      </View>)}
+    </View>
+    {result.mean !== null ? <View style={styles.inlineStats}>
+      <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(result.mean)} mmHg</Text>
+      <Text style={styles.inlineStat}>Koreksi C {fmt(result.correction)} mmHg</Text>
+      <Text style={styles.inlineStat}>U95 {fmt(result.uncertaintyU95)} mmHg</Text>
+      <Text style={styles.inlineStat}>|C| + U95 {fmt(result.decisionValue)} / 4 mmHg</Text>
+    </View> : null}
+  </View>;
+}
+
+function SphygmomanometerStep({ data, result, onChange }: {
+  data: SphygmomanometerData;
+  result: NonNullable<CalculationResult['sphygmomanometer']>;
+  onChange: (data: SphygmomanometerData) => void;
+}) {
+  const updateReading = (setting: number, direction: 'up' | 'down', index: number, value: string) => onChange({
+    ...data,
+    pressureReadings: data.pressureReadings.map((point) => point.setting !== setting ? point : {
+      ...point,
+      [direction]: point[direction].map((reading, readingIndex) => readingIndex === index ? value : reading),
+    }),
+  });
+  const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
+  return <>
+    <Card>
+      <Heading title="Uji kebocoran" hint="Pompa hingga 250 mmHg, lalu catat penurunan tekanan setelah 1 menit." />
+      <Field label="Penurunan tekanan" value={data.leakageDrop} onChange={(value) => onChange({ ...data, leakageDrop: value })} keyboard="decimal-pad" suffix="mmHg" />
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas penurunan ≤ 15 mmHg</Text>{outcome(result.leakageDrop.pass)}</View>
+    </Card>
+    <Card>
+      <Heading title="Uji deflasi cepat" hint="Pompa hingga 260 mmHg, buka valve dan catat waktu deflasi." />
+      <Field label="Waktu deflasi" value={data.rapidDeflationSeconds} onChange={(value) => onChange({ ...data, rapidDeflationSeconds: value })} keyboard="decimal-pad" suffix="detik" />
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.rapidDeflationSeconds.pass)}</View>
+    </Card>
+    <Card>
+      <Heading title="Uji ketepatan tekanan" hint="Pada setiap setting, catat tiga bacaan Digital Pressure Meter saat tekanan naik dan turun. Koreksi standar dihitung otomatis." />
+      {data.pressureReadings.map((point, index) => {
+        const calculated = result.pressureReadings[index];
+        return <View key={point.setting} style={styles.performanceCard}>
+          <View style={styles.performanceHeading}><Text style={styles.itemTitle}>Setting {point.setting} mmHg</Text></View>
+          <PressureDirectionInput setting={point.setting} label="naik" values={point.up} result={calculated.up} onChange={(readingIndex, value) => updateReading(point.setting, 'up', readingIndex, value)} />
+          <PressureDirectionInput setting={point.setting} label="turun" values={point.down} result={calculated.down} onChange={(readingIndex, value) => updateReading(point.setting, 'down', readingIndex, value)} />
+        </View>;
+      })}
+    </Card>
+  </>;
+}
+
+function MeasurementStep({ data, instrument, result, update, updateInspection, updatePerformance, updateWeighingPoint, updateWeighingRepeatability, updateSphygmomanometer }: {
   data: CalibrationData;
   instrument: Instrument;
   result: CalculationResult;
@@ -411,12 +485,15 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
   updatePerformance: PerformanceUpdate;
   updateWeighingPoint: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
   updateWeighingRepeatability: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
+  updateSphygmomanometer: (data: SphygmomanometerData) => void;
 }) {
   return <>
     <EnvironmentStep data={data} update={update} result={result} />
     <InspectionStep data={data} updateInspection={updateInspection} />
     {instrument.id === 'centrifuge' ? <SafetyStep data={data} update={update} safetyResult={result.safety} /> : null}
-    {instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} /> : <Card>
+    {instrument.sphygmomanometer && data.sphygmomanometer && result.sphygmomanometer
+      ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} onChange={updateSphygmomanometer} />
+      : instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} /> : <Card>
       <Heading title="Pengujian kinerja" hint={instrument.id === 'flowmeter' ? 'Workbook menampilkan ±20% pada label, tetapi rumus ambang di sel menggunakan 10%. Perhitungan aplikasi mengikuti rumus 10%.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
       {data.performance.map((row, rowIndex) => {
         const calculated = result.performance[rowIndex].result;
@@ -461,7 +538,7 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
       {result.safety ? <ValueLine label="Keselamatan listrik" value={result.safetyScore === null ? 'Belum lengkap' : `${result.safetyScore} / 40`} /> : null}
       <ValueLine label="Pemeriksaan fisik dan fungsi" value={result.physicalScore === null ? 'Belum lengkap' : `${result.physicalScore} / ${instrument.score.physicalWeight}`} />
       <ValueLine label="Pengujian kinerja" value={result.performanceScore === null ? 'Belum lengkap' : `${result.performanceScore} / ${instrument.score.performanceWeight}`} />
-      {result.performanceRate !== null ? <ValueLine label="Titik kinerja lulus" value={`${result.performanceRate.toFixed(0)}%`} /> : null}
+      {result.performanceRate !== null ? <ValueLine label={result.sphygmomanometer ? 'Kinerja berbobot' : 'Titik kinerja lulus'} value={`${result.performanceRate.toFixed(0)}%`} /> : null}
     </Card>
     <Card><Heading title="Standar kalibrasi yang dipakai" />
       {(data.selectedDevices ?? []).length ? (data.selectedDevices ?? []).map((device) => <ValueLine key={device.id} label={device.name} value={`${device.brand} · ${device.model} · ${device.serial}`} />) : <Text style={styles.deviceHint}>Standar umum belum dipilih.</Text>}
@@ -474,7 +551,22 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
     {result.safety ? <Card><Heading title="Keselamatan listrik" />
       {result.safety.checks.map((item) => <View key={item.label} style={styles.resultLine}><Text style={styles.resultLabel}>{item.label}</Text><Badge text={item.result === null ? 'KOSONG' : item.result ? 'LULUS' : 'TIDAK LULUS'} tone={item.result === null ? 'wait' : item.result ? 'good' : 'bad'} /></View>)}
     </Card> : null}
-    {result.weighing ? <Card><Heading title="Hasil pengujian timbangan" />
+    {result.sphygmomanometer ? <Card><Heading title="Hasil sphygmomanometer" />
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Uji kebocoran · {fmt(result.sphygmomanometer.leakageDrop.value)} mmHg / batas 15 mmHg</Text>{result.sphygmomanometer.leakageDrop.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.leakageDrop.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.leakageDrop.pass ? 'good' : 'bad'} />}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Deflasi cepat · {fmt(result.sphygmomanometer.rapidDeflationSeconds.value)} detik / batas 10 detik</Text>{result.sphygmomanometer.rapidDeflationSeconds.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'good' : 'bad'} />}</View>
+      {result.sphygmomanometer.pressureReadings.map((point) => (['up', 'down'] as const).map((direction) => {
+        const item = point[direction];
+        const rawReadings = item.readings.map((value) => fmt(value)).join(' · ');
+        return <View key={`${point.setting}-${direction}`} style={styles.resultPerformance}>
+          <View style={styles.resultLine}><Text style={styles.resultLabel}>{point.setting} mmHg · {direction === 'up' ? 'Naik' : 'Turun'}</Text><Badge text={item.pass === null ? 'MENUNGGU' : item.pass ? 'LULUS' : 'TIDAK LULUS'} tone={item.pass === null ? 'wait' : item.pass ? 'good' : 'bad'} /></View>
+          <ValueLine label="Bacaan DPM" value={`${rawReadings} mmHg`} />
+          <ValueLine label="Rata-rata terkoreksi" value={item.mean === null ? '—' : `${fmt(item.mean)} mmHg`} />
+          <ValueLine label="Koreksi C" value={item.correction === null ? '—' : `${fmt(item.correction)} mmHg`} />
+          <ValueLine label="U95" value={item.uncertaintyU95 === null ? '—' : `${fmt(item.uncertaintyU95)} mmHg`} />
+          <ValueLine label="|C| + U95 / batas" value={item.decisionValue === null ? '—' : `${fmt(item.decisionValue)} / 4 mmHg`} />
+        </View>;
+      }))}
+    </Card> : result.weighing ? <Card><Heading title="Hasil pengujian timbangan" />
       <ValueLine label="Rata-rata uji berulang" value={result.weighing.repeatabilityMean === null ? 'Belum lengkap' : `${fmt(result.weighing.repeatabilityMean, 4)} kg`} />
       <ValueLine label="STDEV 10 bacaan" value={result.weighing.repeatabilityStandardDeviation === null ? 'Belum lengkap' : `${fmt(result.weighing.repeatabilityStandardDeviation, 6)} kg`} />
       <ValueLine label="Nilai SD pada laporan Excel" value={`${fmt(result.weighing.reportStandardDeviation, 6)} kg`} />
@@ -611,6 +703,7 @@ export default function CalibrationScreen() {
     const repeatabilityReadings = data.weighing.repeatabilityReadings.map((reading, readingIndex) => readingIndex === index ? { ...reading, [key]: value } : reading);
     updateRecord(record.id, { data: { ...data, weighing: { ...data.weighing, repeatabilityReadings } } });
   };
+  const updateSphygmomanometer = (sphygmomanometer: SphygmomanometerData) => updateRecord(record.id, { data: { ...data, sphygmomanometer } });
   const updateWeighingWeights = (index: number, standardWeights: WeighingStandardWeight[]) => {
     if (!data.weighing) return;
     const points = data.weighing.points.map((point, pointIndex) => pointIndex === index ? { ...point, standardWeights } : point);
@@ -624,7 +717,7 @@ export default function CalibrationScreen() {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {step === 0 ? <IdentityStep data={data} instrument={instrument} customers={customers} loaded={directoryLoaded} update={update} selectCustomer={selectCustomer} /> : null}
         {step === 1 ? <SelectDevicesStep instrument={instrument} data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} onToggleWeights={updateWeighingWeights} /> : null}
-        {step === 2 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} /> : null}
+        {step === 2 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} updateSphygmomanometer={updateSphygmomanometer} /> : null}
         {step === 3 ? <ResultStep data={data} result={result} instrument={instrument} /> : null}
         <View style={styles.navigationButtons}>
           {step > 0 ? <View style={styles.navButton}><ActionButton title="Sebelumnya" secondary onPress={() => setStep(step - 1)} /></View> : <View style={styles.navButton}><ActionButton title="Selesai" secondary onPress={() => router.replace('/')} /></View>}

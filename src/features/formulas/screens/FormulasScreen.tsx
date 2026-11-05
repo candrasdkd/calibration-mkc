@@ -24,6 +24,9 @@ const excelQuestions = [
   'Timbangan mekanik: rumus U95 laporan pada titik 50 kg merujuk sel N92 dan N74. Apakah ini salah salin dan seharusnya memakai hasil titik 50 kg?',
   'Kedua timbangan: rumus U95 pada titik 70 kg merujuk rentang G81:G84 tanpa SUM. Apakah ketidakpastian empat anak timbangan harus dijumlah seperti yang dilakukan aplikasi?',
   'Thermohygrometer: tabel menyebut nilai sertifikat sebagai U95, lalu nilai itu masuk ke uc sebelum dikalikan k=2. Apakah nilai sertifikat perlu dibagi k terlebih dahulu?',
+  'Sphygmomanometer: batas kesalahan tekanan pada OLAH DATA tertulis ±4,5 mmHg, sedangkan SCORING menghitung dengan 4 mmHg. Batas mana yang harus dipakai?',
+  'Sphygmomanometer: batas penurunan kebocoran tertulis <15 mmHg pada OLAH DATA, tetapi SCORING menerima nilai ≤15 mmHg. Apakah nilai tepat 15 mmHg lulus?',
+  'Sphygmomanometer: ada 12 bagian pemeriksaan fisik, tetapi rumus skor SCORING hanya menjumlahkan 10 baris pertama. Apakah seluruh 12 bagian harus dihitung?',
 ];
 
 function FormulaStep({ number, title, equation, detail }: { number: string; title: string; equation: string; detail: string }) {
@@ -69,8 +72,10 @@ function FormulaCard({
   const formulaRows = instrument.performanceRows.filter((row, index, rows) => rows.findIndex((item) => item.formula === row.formula) === index);
   const isActiveWork = Boolean(activeReferences && onReferenceChange);
   const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
-  const summary = instrument.weighingScale
-    ? `${instrument.weighingScale.points.length} titik beban · uji daya ulang ${instrument.weighingScale.repeatabilityLoadKg} kg`
+  const summary = instrument.sphygmomanometer
+    ? `${instrument.sphygmomanometer.pressurePoints.length} titik tekanan · 3 bacaan per arah`
+    : instrument.weighingScale
+      ? `${instrument.weighingScale.points.length} titik beban · uji daya ulang ${instrument.weighingScale.repeatabilityLoadKg} kg`
     : `${instrument.performanceRows.length} titik uji · ${readingCounts.length === 1 ? `${readingCounts[0]} bacaan per titik` : `${readingCounts[0]}–${readingCounts[readingCounts.length - 1]} bacaan per titik`}`;
 
   return <Card style={styles.formulaCard}>
@@ -83,7 +88,35 @@ function FormulaCard({
       <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
     </Pressable>
     {expanded ? <View style={styles.formulaBody}>
-      {instrument.weighingScale ? <>
+      {instrument.sphygmomanometer ? <>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Alur dan batas pengujian</Text>
+          <FormulaStep number="1" title="Kebocoran" equation="Pompa 250 mmHg; ukur penurunan setelah 1 menit" detail="Batas pada rumus yang dipakai aplikasi: ≤ 15 mmHg." />
+          <FormulaStep number="2" title="Deflasi cepat" equation="Pompa 260 mmHg; ukur waktu deflasi" detail="Batas waktu: ≤ 10 detik." />
+          <FormulaStep number="3" title="Ketepatan tekanan" equation={`Setting ${instrument.sphygmomanometer.pressurePoints.join(', ')} mmHg · 3 bacaan DPM saat tekanan naik dan turun`} detail={`Sphygmomanometer ${instrument.sphygmomanometer.accuracyClass === 1 ? 'digital' : 'analog'} · kelas akurasi ${instrument.sphygmomanometer.accuracyClass}.`} />
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
+          <FormulaStep number="1" title="Interpolasi sertifikat" equation="C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)" detail="Koreksi dihitung terpisah untuk pembacaan naik dan turun." />
+          <FormulaStep number="2" title="Bacaan terkoreksi" equation="xi terkoreksi = xi DPM + C(xi DPM)" detail={`U95 sertifikat DPM = ${instrument.sphygmomanometer.dpmU95} mmHg. Kurva di bawah mengikuti nomor seri pada workbook.`} />
+          {instrument.sphygmomanometer.dpmCorrections.map((point) => <ValueLine key={point.pressure} label={`${point.pressure} mmHg`} value={`Naik ${point.up} · Turun ${point.down} mmHg`} />)}
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Koreksi, U95, dan keputusan</Text>
+          <FormulaStep number="1" title="Rata-rata dan koreksi" equation="x̄ = Σxi terkoreksi / 3; C = setting − x̄" detail="Simpangan baku s dihitung dari tiga bacaan DPM yang sudah dikoreksi." />
+          <FormulaStep number="2" title="Komponen ketidakpastian" equation={`u resolusi = (0,5 × kelas akurasi) / √6; u ulang = s / √3; u drift = drift / √3; u DPM = U95 sertifikat / 2`} detail="Nilai drift mengikuti tabel pada workbook dan arah tekanan." />
+          <FormulaStep number="3" title="U95 dan kelulusan" equation="uc = √Σui²; νeff = uc⁴ / Σ(ui⁴ / νi); U95 = max[t(0,975; νeff) × uc, 0,99 mmHg]" detail="Satu arah lulus jika |C| + U95 ≤ 4 mmHg." />
+          {instrument.sphygmomanometer.drift.map((point) => <ValueLine key={point.pressure} label={`Drift ${point.pressure} mmHg`} value={`Naik ${point.up} · Turun ${point.down} mmHg`} />)}
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Bobot skor</Text>
+          <ValueLine label="Pemeriksaan fisik" value="10 poin · lulus jika minimal 70% bagian baik" />
+          <ValueLine label="Uji kebocoran" value="30 poin" />
+          <ValueLine label="Deflasi cepat" value="30 poin" />
+          <ValueLine label="Tekanan naik" value="15 poin · proporsional dari 6 titik lulus" />
+          <ValueLine label="Tekanan turun" value="15 poin · proporsional dari 6 titik lulus" />
+        </View>
+      </> : instrument.weighingScale ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik pemeriksaan</Text>
           <Text style={styles.groupHint}>Uji daya ulang dilakukan pada beban {instrument.weighingScale.repeatabilityLoadKg} kg dengan 10 bacaan. Pengujian beban memakai titik berikut:</Text>
@@ -141,7 +174,9 @@ function FormulaCard({
           </>}
         </View>
       </>}
-      <Text style={styles.readOnlyNote}>Rumus dan aturan hitung hanya untuk dibaca. Nilai acuan di atas bisa diedit khusus pada pekerjaan yang sedang dibuka.</Text>
+      <Text style={styles.readOnlyNote}>{instrument.sphygmomanometer
+        ? `Kurva dan U95 DPM terikat pada nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}. Standar dengan nomor seri lain belum bisa dihitung memakai kurva ini.`
+        : 'Rumus dan aturan hitung hanya untuk dibaca. Nilai acuan di atas bisa diedit khusus pada pekerjaan yang sedang dibuka.'}</Text>
     </View> : null}
   </Card>;
 }

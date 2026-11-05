@@ -11,6 +11,10 @@ import type {
   SafetyCheck,
   SafetyData,
   SafetyResult,
+  SphygmomanometerConfig,
+  SphygmomanometerData,
+  SphygmomanometerDirectionResult,
+  SphygmomanometerResult,
   ThermohygrometerPoint,
   WeighingData,
   WeighingResult,
@@ -117,6 +121,73 @@ function calculateWeighing(instrument: Instrument, data?: WeighingData): Weighin
     lop,
     limit: 10 * config.resolutionKg,
     pass: lop === null ? null : lop <= 10 * config.resolutionKg,
+    complete,
+  };
+}
+
+function interpolatePressureCorrection(value: number, config: SphygmomanometerConfig, direction: 'up' | 'down'): number | null {
+  const table = config.dpmCorrections;
+  if (value < table[0].pressure || value > table[table.length - 1].pressure) return null;
+  for (let index = 1; index < table.length; index += 1) {
+    const upper = table[index];
+    const lower = table[index - 1];
+    if (value <= upper.pressure) {
+      const portion = (value - lower.pressure) / (upper.pressure - lower.pressure);
+      return lower[direction] + portion * (upper[direction] - lower[direction]);
+    }
+  }
+  return table[table.length - 1][direction];
+}
+
+function calculateSphygmomanometer(config: SphygmomanometerConfig, data: SphygmomanometerData | undefined, standardValid: boolean): SphygmomanometerResult {
+  const leakageDrop = number(data?.leakageDrop);
+  const rapidDeflationSeconds = number(data?.rapidDeflationSeconds);
+  const pressureReadings = config.pressurePoints.map((setting) => {
+    const input = data?.pressureReadings.find((item) => item.setting === setting);
+    const calculateDirection = (direction: 'up' | 'down'): SphygmomanometerDirectionResult => {
+      const readings = (input?.[direction] ?? []).map(number);
+      const corrections = readings.map((reading) => reading === null ? null : interpolatePressureCorrection(reading, config, direction));
+      const correctedReadings = readings.map((reading, index) => reading === null || corrections[index] === null ? null : reading + corrections[index]!);
+      const complete = readings.length === 3 && readings.every((reading) => reading !== null)
+        && correctedReadings.every((reading) => reading !== null);
+      const drift = config.drift.find((item) => item.pressure === setting)?.[direction];
+      if (!complete || drift === undefined) return {
+        readings, correctedReadings, mean: null, standardDeviation: null, correction: null,
+        uncertaintyU95: null, decisionValue: null, complete: false, pass: null,
+      };
+      if (!standardValid) return {
+        readings, correctedReadings: readings.map(() => null), mean: null, standardDeviation: null,
+        correction: null, uncertaintyU95: null, decisionValue: null, complete: true, pass: null,
+      };
+      const validReadings = correctedReadings as number[];
+      const mean = average(validReadings);
+      const standardDeviation = sampleStandardDeviation(validReadings);
+      const components = [
+        (0.5 * config.accuracyClass) / Math.sqrt(6),
+        standardDeviation / Math.sqrt(3),
+        drift / Math.sqrt(3),
+        config.dpmU95 / 2,
+      ];
+      const variance = components.reduce((sum, component) => sum + component ** 2, 0);
+      const dofDenominator = components.reduce((sum, component, index) => sum + component ** 4 / [50, 5, 50, 50][index], 0);
+      const effectiveDof = variance ** 2 / dofDenominator;
+      const uncertaintyU95 = Math.max(studentTCritical95(effectiveDof) * Math.sqrt(variance), 0.99);
+      const correction = setting - mean;
+      const decisionValue = Math.abs(correction) + uncertaintyU95;
+      return {
+        readings, correctedReadings, mean, standardDeviation, correction, uncertaintyU95,
+        decisionValue, complete: true, pass: decisionValue <= 4,
+      };
+    };
+    return { setting, up: calculateDirection('up'), down: calculateDirection('down') };
+  });
+  const complete = leakageDrop !== null && rapidDeflationSeconds !== null
+    && pressureReadings.length === config.pressurePoints.length
+    && pressureReadings.every((point) => point.up.complete && point.down.complete) && standardValid;
+  return {
+    leakageDrop: { value: leakageDrop, pass: leakageDrop === null ? null : leakageDrop <= 15 },
+    rapidDeflationSeconds: { value: rapidDeflationSeconds, pass: rapidDeflationSeconds === null ? null : rapidDeflationSeconds <= 10 },
+    pressureReadings,
     complete,
   };
 }
@@ -260,6 +331,12 @@ function calculateSafety(safety: SafetyData): SafetyResult {
 export function calculateRecord(instrument: Instrument, data: CalibrationData): CalculationResult {
   const environment = calculateEnvironment(data);
   const weighing = calculateWeighing(instrument, data.weighing);
+  const dpmSerial = instrument.standards.find(([name]) => name.toLowerCase() === 'digital pressure meter')?.[3];
+  const selectedDpm = data.selectedDevices?.find((device) => device.name.toLowerCase() === 'digital pressure meter');
+  const dpmStandardValid = data.selectedDevices === undefined || selectedDpm?.serial === dpmSerial;
+  const sphygmomanometer = instrument.sphygmomanometer
+    ? calculateSphygmomanometer(instrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid)
+    : null;
   const performance = data.performance.map((row) => ({
     ...row,
     result: calculatePerformanceRow(row, data.references),
@@ -279,12 +356,21 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     ? null
     : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
   const safety = instrument.id === 'centrifuge' ? calculateSafety(data.safety) : null;
-  const performanceComplete = weighing ? weighing.complete : performance.length > 0 && performance.every((row) => row.result !== null);
+  const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete : performance.length > 0 && performance.every((row) => row.result !== null);
   const performanceRate = weighing
     ? weighing.pass === null ? null : weighing.pass ? 100 : 0
+    : sphygmomanometer
+      ? sphygmomanometer.complete
+        ? ((Number(sphygmomanometer.leakageDrop.pass) * 30
+          + Number(sphygmomanometer.rapidDeflationSeconds.pass) * 30
+          + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.up.pass), 0) * 15 / 6
+          + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.down.pass), 0) * 15 / 6) / 90) * 100
+        : null
     : performanceComplete ? (performance.filter((row) => row.result?.pass === true).length / performance.length) * 100 : null;
   const performanceScore = weighing
     ? weighing.pass === null ? null : weighing.pass ? instrument.score.performanceWeight : 0
+    : sphygmomanometer
+      ? performanceRate === null ? null : performanceRate * instrument.score.performanceWeight / 100
     : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
   const safetyScore = safety ? safety.score : 0;
   const score = physicalScore !== null && performanceScore !== null && safetyScore !== null
@@ -306,6 +392,12 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   for (const [name] of instrument.standards) {
     if (!selectedStandardNames.has(name.trim().toLowerCase())) missing.push(`Standar wajib: ${name}`);
   }
+  if (sphygmomanometer && data.selectedDevices && dpmSerial) {
+    if (!selectedDpm) missing.push(`Pilih Digital Pressure Meter dengan nomor seri ${dpmSerial} agar koreksinya sesuai sertifikat.`);
+    else if (selectedDpm.serial !== dpmSerial) {
+      missing.push(`Digital Pressure Meter ${selectedDpm.serial} tidak cocok dengan kurva sertifikat ${dpmSerial} pada workbook.`);
+    }
+  }
   if (!environment.temperature || !environment.humidity) missing.push('Data suhu dan kelembaban ruangan');
   if (environment.errors.length) missing.push(...environment.errors);
   if (!inspectionComplete) missing.push('Pemeriksaan fisik dan fungsi');
@@ -315,11 +407,18 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       if (!point.standardWeightsComplete) missing.push(`Pilih anak timbangan dengan total ${point.loadKg} kg`);
       if (point.zeroReading === null || point.indication === null) missing.push(`Bacaan nol dan penunjukan untuk beban ${point.loadKg} kg`);
     }
+  } else if (sphygmomanometer) {
+    if (sphygmomanometer.leakageDrop.value === null) missing.push('Penurunan tekanan pada uji kebocoran');
+    if (sphygmomanometer.rapidDeflationSeconds.value === null) missing.push('Waktu deflasi cepat');
+    for (const point of sphygmomanometer.pressureReadings) {
+      if (!point.up.complete) missing.push(`3 bacaan DPM arah naik pada ${point.setting} mmHg (rentang 0–300 mmHg)`);
+      if (!point.down.complete) missing.push(`3 bacaan DPM arah turun pada ${point.setting} mmHg (rentang 0–300 mmHg)`);
+    }
   } else if (!performanceComplete) missing.push('Titik ukur, bacaan, dan ketidakpastian kinerja');
   if (safety && !safety.complete) missing.push('Semua pemeriksaan keselamatan listrik');
   const referenceValues = [data.references.calibratorResolution, data.references.calibratorUncertainty, data.references.uutResolution].map(number);
   const validReferenceValues = referenceValues.filter((value): value is number => value !== null);
-  if (!weighing && (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0)) {
+  if (!weighing && !sphygmomanometer && (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0)) {
     missing.push('Resolusi dan ketidakpastian standar harus valid');
   }
 
@@ -332,6 +431,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     performanceRate,
     performanceScore,
     weighing,
+    sphygmomanometer,
     safety,
     safetyScore,
     score,
