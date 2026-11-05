@@ -10,7 +10,6 @@ import { styles } from '../styles/FormulasScreenStyles';
 import type { MeasurementReferences, PerformanceFormula } from '../../../core/types';
 import type { FormulaDisplay } from '../types/FormulaDisplay';
 
-
 const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
   centrifugeSpeed: { title: 'Kecepatan putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √3', acceptance: '|C + U95| ≤ MPE' },
   centrifugeTime: { title: 'Waktu putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √3', acceptance: '|C + U95| ≤ MPE' },
@@ -18,67 +17,131 @@ const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
   flowmeter: { title: 'Laju aliran', correction: 'C = |setting| − |x̄|', repeatability: 'UA = s / √5', acceptance: '|C| + U95 ≤ MPE' },
 };
 
-function FormulaCard({ instrument }: { instrument: (typeof instruments)[number] }) {
+const excelQuestions = [
+  'Flowmeter: tabel memberi label ±20%, tetapi rumus batas menghitung setting × 10%. Batas yang dipakai seharusnya 10% atau 20%?',
+  'Thermohygrometer: koreksi RH pada 50% untuk Thermohygro 4 tertulis +10,1%. Angka ini benar atau tanda koreksinya keliru?',
+  'Timbangan digital: laporan memakai batas minimum U95 0,75 kg, sementara hitungan anggaran sekitar 0,076 kg. Apakah 0,75 memang disengaja atau seharusnya 0,075 kg?',
+  'Timbangan mekanik: rumus U95 laporan pada titik 50 kg merujuk sel N92 dan N74. Apakah ini salah salin dan seharusnya memakai hasil titik 50 kg?',
+  'Kedua timbangan: rumus U95 pada titik 70 kg merujuk rentang G81:G84 tanpa SUM. Apakah ketidakpastian empat anak timbangan harus dijumlah seperti yang dilakukan aplikasi?',
+  'Thermohygrometer: tabel menyebut nilai sertifikat sebagai U95, lalu nilai itu masuk ke uc sebelum dikalikan k=2. Apakah nilai sertifikat perlu dibagi k terlebih dahulu?',
+];
+
+function FormulaStep({ number, title, equation, detail }: { number: string; title: string; equation: string; detail: string }) {
+  return <View style={styles.formulaStep}>
+    <Text style={styles.stepNumber}>{number}</Text>
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>{title}</Text>
+      <Text style={styles.stepEquation}>{equation}</Text>
+      <Text style={styles.stepDetail}>{detail}</Text>
+    </View>
+  </View>;
+}
+
+function ExcelQuestionsCard() {
+  const [expanded, setExpanded] = useState(false);
+  return <Card style={styles.questionCard}>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.questionToggle}>
+      <View style={styles.questionTitleWrap}>
+        <Text style={styles.questionTitle}>Catatan Excel · perlu konfirmasi</Text>
+        <Text style={styles.questionSubtitle}>{excelQuestions.length} hal yang perlu dipastikan sebelum template jadi acuan final</Text>
+      </View>
+      <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
+    </Pressable>
+    {expanded ? <View style={styles.questionList}>
+      {excelQuestions.map((question, index) => <View key={question} style={styles.questionRow}>
+        <Text style={styles.questionNumber}>{index + 1}</Text>
+        <Text style={styles.questionText}>{question}</Text>
+      </View>)}
+    </View> : null}
+  </Card>;
+}
+
+function FormulaCard({
+  instrument,
+  activeReferences,
+  onReferenceChange,
+}: {
+  instrument: (typeof instruments)[number];
+  activeReferences?: MeasurementReferences;
+  onReferenceChange?: (key: keyof MeasurementReferences, value: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const formulaRows = instrument.performanceRows.filter((row, index, rows) => rows.findIndex((item) => item.formula === row.formula) === index);
+  const isActiveWork = Boolean(activeReferences && onReferenceChange);
+  const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
+  const summary = instrument.weighingScale
+    ? `${instrument.weighingScale.points.length} titik beban · uji daya ulang ${instrument.weighingScale.repeatabilityLoadKg} kg`
+    : `${instrument.performanceRows.length} titik uji · ${readingCounts.length === 1 ? `${readingCounts[0]} bacaan per titik` : `${readingCounts[0]}–${readingCounts[readingCounts.length - 1]} bacaan per titik`}`;
+
   return <Card style={styles.formulaCard}>
     <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.formulaToggle}>
-      <View style={styles.formulaTitleWrap}><Text style={styles.formulaTitle}>{instrument.name}</Text><Text style={styles.formulaSubtitle}>{instrument.subtitle}</Text></View>
+      <View style={styles.formulaTitleWrap}>
+        <Text style={styles.formulaTitle}>{instrument.name}</Text>
+        <Text style={styles.formulaSubtitle}>{instrument.subtitle}</Text>
+        <Text style={styles.formulaMeta}>{summary}</Text>
+      </View>
       <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
     </Pressable>
     {expanded ? <View style={styles.formulaBody}>
       {instrument.weighingScale ? <>
         <View style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>Uji berulang · beban {instrument.weighingScale.repeatabilityLoadKg} kg · 10 bacaan</Text>
-          <Text style={styles.equation}>ri = mi − zi; x̄ = Σri / 10; s = √[Σ(ri − x̄)² / 9]</Text>
-          <Text style={styles.equation}>Nilai simpangan baku pada laporan Excel = √(2/3) × (0,5 × d)</Text>
-          <Text style={styles.equation}>Komponen daya ulang dalam anggaran U = (0,5 × d) / 2</Text>
+          <Text style={styles.formulaGroupTitle}>Titik pemeriksaan</Text>
+          <Text style={styles.groupHint}>Uji daya ulang dilakukan pada beban {instrument.weighingScale.repeatabilityLoadKg} kg dengan 10 bacaan. Pengujian beban memakai titik berikut:</Text>
+          <View style={styles.pointList}>
+            {instrument.weighingScale.points.map((point) => <View key={point.id} style={styles.pointRow}>
+              <Text style={styles.pointValue}>{point.loadKg} kg</Text>
+              <Text style={styles.pointDescription}>{point.defaultStandardWeightSerials.join(' + ')}</Text>
+            </View>)}
+          </View>
         </View>
         <View style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>Koreksi dan ketidakpastian · standar massa 2026</Text>
-          <Text style={styles.equation}>Massa acuan = Σ massa konvensional 2026; C = bacaan berbeban − massa acuan</Text>
-          <Text style={styles.equation}>u resolusi = (0,5 × d) / √{instrument.weighingScale.resolutionDivisor}</Text>
-          <Text style={styles.equation}>u sertifikat = (Σ U95 anak timbangan / 2) / 1000</Text>
-          <Text style={styles.equation}>Drift per anak = 0,5 × (massa 2026 − massa 2025) / √3</Text>
-          <Text style={styles.equation}>u drift = (Σ drift / √3) / 1000</Text>
-          <Text style={styles.equation}>uc = √(u resolusi² + u ulang² + u sertifikat² + u drift²)</Text>
-          <Text style={styles.equation}>νeff = uc⁴ / Σ(ui⁴ / 50); k = t(0,975; νeff); U95 = k × uc</Text>
-          <Text style={styles.equation}>LOP = maksimum |C| + maksimum U95</Text>
-          <Text style={styles.equationStrong}>Laik jika LOP ≤ 10 × d = {10 * instrument.weighingScale.resolutionKg} kg</Text>
-        </View>
-        <View style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>Komposisi beban standar dari Excel</Text>
-          {instrument.weighingScale.points.map((point) => <Text key={point.id} style={styles.equation}>{point.loadKg} kg · default: {point.defaultStandardWeightSerials.join(' + ')}</Text>)}
+          <Text style={styles.formulaGroupTitle}>Urutan perhitungan</Text>
+          <FormulaStep number="1" title="Daya ulang" equation="ri = indikasi − nol; x̄ = Σri / 10; s = √[Σ(ri − x̄)² / 9]" detail={`Simpangan baku yang dilaporkan di Excel = √(2/3) × (0,5 × d). Komponen u daya ulang = (0,5 × d) / 2.`} />
+          <FormulaStep number="2" title="Koreksi di tiap titik beban" equation="Massa acuan = Σ massa konvensional 2026; C = indikasi − massa acuan" detail="Aplikasi menjumlahkan massa acuan dari anak timbangan yang dipilih untuk titik tersebut." />
+          <FormulaStep number="3" title="Ketidakpastian baku gabungan" equation="uc = √(u resolusi² + u ulang² + u sertifikat² + u drift²)" detail={`u resolusi = (0,5 × d) / √${instrument.weighingScale.resolutionDivisor}; u sertifikat = (Σ U95 anak timbangan / 2) / 1000.`} />
+          <FormulaStep number="4" title="U95 dan keputusan" equation="νeff = uc⁴ / Σ(ui⁴ / 50); U95 = t(0,975; νeff) × uc" detail={`LOP = maksimum |C| + maksimum U95. Lulus jika LOP ≤ 10 × d = ${10 * instrument.weighingScale.resolutionKg} kg.`} />
+          <Text style={styles.subEquation}>u drift = [Σ{`{0,5 × (massa 2026 − massa 2025) / √3}`} / √3] / 1000</Text>
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Parameter alat</Text>
           <ValueLine label="Kapasitas" value={`${instrument.weighingScale.capacityKg} kg`} />
           <ValueLine label="Resolusi d" value={`${instrument.weighingScale.resolutionKg} kg`} />
-          <ValueLine label="Pembagi resolusi" value={`√${instrument.weighingScale.resolutionDivisor}`} />
+          <ValueLine label="Pembagi u resolusi" value={`√${instrument.weighingScale.resolutionDivisor}`} />
         </View>
-        <Text style={styles.formulaWarning}>Catatan workbook: pengujian berulang tetap 40 kg dan titik beban 10–100 kg. Di titik 70 kg, aplikasi menjumlahkan semua anak timbangan; laporan menampilkan U95 hitungan asli, bukan nilai tampilan minimum 0,75 kg pada Excel.</Text>
       </> : <>
-      {formulaRows.map((row) => {
-        const formula = formulaDisplay[row.formula];
-        return <View key={row.formula} style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>{formula.title} · {row.count} bacaan · toleransi {row.tolerancePercent}%</Text>
-          <Text style={styles.equation}>x̄ = Σxi / n</Text>
-          <Text style={styles.equation}>s = √[Σ(xi − x̄)² / (n − 1)]</Text>
-          <Text style={styles.equation}>{formula.correction}</Text>
-          <Text style={styles.equation}>{formula.repeatability}</Text>
-          <Text style={styles.equation}>U95 = 2 × √[UA² + (Usertifikat / 2)² + (resUUT / (2√3))² + (resKal / (2√3))²]</Text>
-          <Text style={styles.equationStrong}>Lulus jika {formula.acceptance}, MPE = setting × {row.tolerancePercent}%</Text>
-        </View>;
-      })}
-      <View style={styles.formulaGroup}>
-        <Text style={styles.formulaGroupTitle}>Nilai standar dan resolusi · default Excel</Text>
-        <ValueLine label="Resolusi kalibrator" value={instrument.references.calibratorResolution} />
-        <ValueLine label="Ketidakpastian kalibrator (U)" value={instrument.references.calibratorUncertainty} />
-        <ValueLine label="Resolusi alat yang diuji (UUT)" value={instrument.references.uutResolution} />
-      </View>
-      {instrument.id === 'flowmeter' ? <Text style={styles.formulaWarning}>Workbook menampilkan label ±20%, tetapi rumus batas di sheet Olah Data menggunakan 10%.</Text> : null}
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Titik pemeriksaan</Text>
+          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value={`${row.count} bacaan · toleransi ${row.tolerancePercent}%`} />)}
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Urutan perhitungan</Text>
+          {formulaRows.map((row, index) => {
+            const formula = formulaDisplay[row.formula];
+            return <View key={row.formula} style={styles.methodGroup}>
+              <Text style={styles.methodTitle}>{formula.title} · {row.count} bacaan</Text>
+              <FormulaStep number="1" title="Rata-rata dan simpangan baku" equation="x̄ = Σxi / n; s = √[Σ(xi − x̄)² / (n − 1)]" detail={`n adalah jumlah bacaan pada tiap titik (${row.count}).`} />
+              <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
+              <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
+              <FormulaStep number="4" title="Ketidakpastian bentangan 95%" equation="U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]" detail="Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan." />
+              <FormulaStep number="5" title="Batas toleransi" equation={`MPE = setting × ${row.tolerancePercent}%; lulus jika ${formula.acceptance}`} detail="MPE adalah batas kesalahan maksimum yang diizinkan pada titik uji." />
+            </View>;
+          })}
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>{isActiveWork ? 'Nilai acuan pekerjaan ini' : 'Nilai acuan default Excel'}</Text>
+          {isActiveWork && activeReferences ? <>
+            <Text style={styles.groupHint}>Nilai ini dipakai di rumus U95 dan hanya berlaku untuk pekerjaan yang sedang dibuka.</Text>
+            <Field label="Resolusi kalibrator" value={activeReferences.calibratorResolution} keyboard="decimal-pad" onChange={(value) => onReferenceChange?.('calibratorResolution', value)} />
+            <Field label="Ketidakpastian kalibrator (U)" value={activeReferences.calibratorUncertainty} keyboard="decimal-pad" onChange={(value) => onReferenceChange?.('calibratorUncertainty', value)} />
+            <Field label="Resolusi alat yang diuji (UUT)" value={activeReferences.uutResolution} keyboard="decimal-pad" onChange={(value) => onReferenceChange?.('uutResolution', value)} />
+          </> : <>
+            <ValueLine label="Resolusi kalibrator" value={instrument.references.calibratorResolution} />
+            <ValueLine label="Ketidakpastian kalibrator (U)" value={instrument.references.calibratorUncertainty} />
+            <ValueLine label="Resolusi alat yang diuji (UUT)" value={instrument.references.uutResolution} />
+          </>}
+        </View>
       </>}
-      <Text style={styles.readOnlyNote}>Rumus hanya untuk dibaca. Nilai dan aturan hitung mengikuti template Excel.</Text>
+      <Text style={styles.readOnlyNote}>Rumus dan aturan hitung hanya untuk dibaca. Nilai acuan di atas bisa diedit khusus pada pekerjaan yang sedang dibuka.</Text>
     </View> : null}
   </Card>;
 }
@@ -88,28 +151,26 @@ export function FormulasScreen() {
   const recordId = Array.isArray(rawRecordId) ? rawRecordId[0] : rawRecordId;
   const { records, updateRecord } = useRecords();
   const record = records.find((item) => item.id === recordId);
-  const instrument = record ? getInstrument(record.instrumentId) : undefined;
+  const activeInstrument = record ? getInstrument(record.instrumentId) : undefined;
   const updateReference = (key: keyof MeasurementReferences, value: string) => {
     if (!record) return;
     updateRecord(record.id, { data: { ...record.data, references: { ...record.data.references, [key]: value } } });
   };
-  return <ScreenPage title="Rumus" backLabel={record ? 'Pengerjaan' : 'Menu utama'} hint={record && instrument ? `Nilai standar bisa disesuaikan untuk pekerjaan ${instrument.name} ini.` : 'Rumus alat, standar, dan kondisi lingkungan ada di satu tempat. Tampilan rumus hanya baca.'}>
+
+  return <ScreenPage title="Rumus" backLabel={record ? 'Pengerjaan' : 'Menu utama'} hint={record && activeInstrument ? `Rumus ${activeInstrument.name} dan alat lain bisa dibuka di bawah. Nilai acuan pekerjaan ada di rumus alat terkait.` : 'Pilih alat untuk melihat titik uji, urutan hitung, nilai acuan, dan batas lulusnya.'}>
     <Card>
-      <Heading title="Kondisi lingkungan · thermohygrometer" hint="Koreksi suhu dan kelembaban menggunakan tabel sertifikat acuan, lalu dihitung untuk kondisi ruangan." />
-      <Text style={styles.equation}>C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)</Text>
-      <Text style={styles.equation}>Nilai terkoreksi = bacaan + C(bacaan)</Text>
-      <Text style={styles.equation}>Rata-rata = (awal terkoreksi + akhir terkoreksi) / 2</Text>
-      <Text style={styles.equation}>Rentang = |awal terkoreksi − akhir terkoreksi|</Text>
-      <Text style={styles.equation}>UA = s / √2; ures = (0,5 × 0,1) / √3</Text>
-      <Text style={styles.equation}>U95 = 2 × √[UA² + U95 sertifikat² + ures²]</Text>
-      <Text style={styles.readOnlyNote}>Perhitungan dilakukan terpisah untuk suhu dan kelembaban.</Text>
+      <Heading title="Kondisi lingkungan" hint="Suhu dan kelembapan ruangan dihitung terpisah memakai koreksi thermohygrometer acuan." />
+      <FormulaStep number="1" title="Cari koreksi dari sertifikat" equation="C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)" detail="Interpolasi di antara dua titik sertifikat yang mengapit bacaan." />
+      <FormulaStep number="2" title="Koreksi bacaan awal dan akhir" equation="Nilai terkoreksi = bacaan + C(bacaan)" detail="Koreksi awal dan akhir dicari masing-masing dari tabel sertifikat." />
+      <FormulaStep number="3" title="Ringkas kondisi ruangan" equation="Rata-rata = (awal terkoreksi + akhir terkoreksi) / 2; rentang = |awal − akhir|" detail="Rata-rata terkoreksi dicatat sebagai hasil suhu atau kelembapan ruangan." />
+      <FormulaStep number="4" title="Hitung ketidakpastian" equation="UA = s / √2; ures = (0,5 × 0,1) / √3; U95 = 2 × √(UA² + U sertifikat² + ures²)" detail="s dihitung dari bacaan awal dan akhir sebelum koreksi." />
     </Card>
-    {record && instrument && !instrument.weighingScale ? <Card>
-      <Heading title={`Standar pengukuran · ${instrument.name}`} hint="Perubahan disimpan ke pekerjaan ini saja dan langsung digunakan dalam hitungan U95." />
-      <Field label="Resolusi kalibrator" value={record.data.references.calibratorResolution} keyboard="decimal-pad" onChange={(value) => updateReference('calibratorResolution', value)} />
-      <Field label="Ketidakpastian kalibrator (U)" value={record.data.references.calibratorUncertainty} keyboard="decimal-pad" onChange={(value) => updateReference('calibratorUncertainty', value)} />
-      <Field label="Resolusi alat yang diuji (UUT)" value={record.data.references.uutResolution} keyboard="decimal-pad" onChange={(value) => updateReference('uutResolution', value)} />
-    </Card> : null}
-    {instruments.map((instrument) => <FormulaCard key={instrument.id} instrument={instrument} />)}
+    <ExcelQuestionsCard />
+    {instruments.map((instrument) => <FormulaCard
+      key={instrument.id}
+      instrument={instrument}
+      activeReferences={activeInstrument?.id === instrument.id ? record?.data.references : undefined}
+      onReferenceChange={activeInstrument?.id === instrument.id ? updateReference : undefined}
+    />)}
   </ScreenPage>;
 }
