@@ -11,9 +11,9 @@ import { styles } from '../styles/HomeScreenStyles';
 
 const adminMenus = [
   { path: '/admin/customers', title: 'Pelanggan', subtitle: 'Rumah sakit dan PIC', countKey: 'customers' },
-  { path: '/admin/devices', title: 'Alat ukur', subtitle: 'Standar dan sertifikat', countKey: 'devices' },
+  { path: '/admin/devices', title: 'Standar kalibrasi', subtitle: 'Alat ukur dan sertifikat', countKey: 'devices' },
   { path: '/admin/technicians', title: 'Teknisi', subtitle: 'Petugas pelaksana', countKey: 'technicians' },
-  { path: '/admin/instruments', title: 'Alat kesehatan', subtitle: 'Jenis alat & metode kerja', countKey: 'equipmentMethods' },
+  { path: '/admin/instruments', title: 'Katalog kalibrasi', subtitle: 'Jenis alat & metode kerja', countKey: 'equipmentMethods' },
 ] as const;
 
 export default function HomeScreen() {
@@ -57,7 +57,7 @@ export default function HomeScreen() {
           <View style={styles.metrics}>
             <View style={styles.metric}><Text style={styles.metricValue}>{directory.customers.length}</Text><Text style={styles.metricLabel}>Pelanggan</Text></View>
             <View style={styles.metricDivider} />
-            <View style={styles.metric}><Text style={styles.metricValue}>{directory.devices.length}</Text><Text style={styles.metricLabel}>Alat ukur</Text></View>
+            <View style={styles.metric}><Text style={styles.metricValue}>{directory.devices.length}</Text><Text style={styles.metricLabel}>Standar</Text></View>
             <View style={styles.metricDivider} />
             <View style={styles.metric}><Text style={styles.metricValue}>{directory.technicians.length}</Text><Text style={styles.metricLabel}>Teknisi</Text></View>
           </View>
@@ -83,8 +83,8 @@ export default function HomeScreen() {
         <View style={styles.technicianHero}>
           <Text style={styles.overviewEyebrow}>PEKERJAAN BARU</Text>
           <Text style={styles.technicianTitle}>Mulai kalibrasi</Text>
-          <Text style={styles.technicianHint}>Pilih alat, lengkapi identitas, lalu masukkan hasil pengukuran.</Text>
-          <Pressable accessibilityRole="button" onPress={() => router.push('/form')} style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}><Text style={styles.startButtonText}>Pilih alat untuk dikerjakan</Text><Text style={styles.startArrow}>→</Text></Pressable>
+          <Text style={styles.technicianHint}>Pilih jenis kalibrasi, isi identitas, lalu masukkan hasil pengukuran.</Text>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/form')} style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}><Text style={styles.startButtonText}>Pilih jenis kalibrasi</Text><Text style={styles.startArrow}>→</Text></Pressable>
         </View>
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Alat bantu</Text></View>
         <View style={styles.technicianActions}>

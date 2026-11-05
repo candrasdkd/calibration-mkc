@@ -4,6 +4,7 @@ import type {
   Thermohygrometer,
   ThermohygrometerPoint,
 } from './types';
+import { adultScaleDigital, adultScaleMechanical, adultScaleStandards } from './weighingScales';
 
 const readings = (count: number): string[] => Array.from({ length: count }, () => '');
 const points = (values: [number, number][]): ThermohygrometerPoint[] => values.map(([value, correction]) => ({ value, correction }));
@@ -113,6 +114,28 @@ export const instruments: Instrument[] = [
     references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '0.1' },
     score: { performanceThreshold: 30, performanceWeight: 90, physicalWeight: 10 },
   },
+  {
+    id: 'adult-scale-digital',
+    name: 'Timbangan Dewasa Digital',
+    subtitle: 'Digital · kapasitas 150 kg · resolusi 0,1 kg',
+    standards: adultScaleStandards,
+    inspectionItems: ['Permukaan timbangan', 'Tampilan digital', 'Indikator', 'Pegas', 'Selektor / tombol zero'],
+    performanceRows: [],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '0.1' },
+    score: { performanceThreshold: 70, performanceWeight: 90, physicalWeight: 10 },
+    weighingScale: adultScaleDigital,
+  },
+  {
+    id: 'adult-scale-mechanical',
+    name: 'Timbangan Dewasa Mekanik',
+    subtitle: 'Mekanik · kapasitas 130 kg · resolusi 1 kg',
+    standards: adultScaleStandards,
+    inspectionItems: ['Permukaan timbangan', 'Tampilan skala', 'Jarum penunjuk', 'Pegas', 'Selektor / tombol zero'],
+    performanceRows: [],
+    references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 90, physicalWeight: 10 },
+    weighingScale: adultScaleMechanical,
+  },
 ];
 
 export const getInstrument = (id: string): Instrument | undefined => instruments.find((instrument) => instrument.id === id);
@@ -124,7 +147,9 @@ export function createInitialData(instrumentId: string): CalibrationData {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return {
     identity: {
-      customerId: '', documentNumber: '', labelNumber: '', brand: '', model: '', serial: '', capacity: '', accuracy: '',
+      customerId: '', documentNumber: '', labelNumber: '', brand: '', model: '', serial: '',
+      capacity: instrument.weighingScale ? String(instrument.weighingScale.capacityKg) : '',
+      accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : '',
       technician: '', receivedDate: today, testDate: today, issueDate: '', room: '', customer: '', address: '', city: '', method: '',
     },
     environment: {
@@ -135,6 +160,11 @@ export function createInitialData(instrumentId: string): CalibrationData {
     references: { ...instrument.references },
     inspections: instrument.inspectionItems.map((label) => ({ label, physical: '', function: '', note: '' })),
     performance: instrument.performanceRows.map((row) => ({ ...row, readings: readings(row.count) })),
+    ...(instrument.weighingScale ? { weighing: {
+      repeatabilityReadings: Array.from({ length: 10 }, () => ({ zeroReading: '', indication: '' })),
+      points: instrument.weighingScale.points.map(({ id }) => ({ id, zeroReading: '', indication: '', standardWeights: [] })),
+      standardsInitialized: false,
+    } } : {}),
     safety: {
       voltage: '', earthType: '2', earthResistance: '',
       leakageType: '1', equipmentLeakage: '', appliedLeakage: '', appliedLeakageNA: false, insulationResistance: '',

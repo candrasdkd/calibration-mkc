@@ -1,13 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import { instruments, thermohygrometers } from './instruments';
+import { adultScaleStandardWeights } from './weighingScales';
 import type { Thermohygrometer } from './types';
 
 export interface ContactPerson { id: string; name: string; phone: string }
 export interface Customer { id: string; name: string; province: string; provinceId?: string; city: string; cityId?: string; district: string; districtId?: string; village: string; villageId?: string; address: string; contacts: ContactPerson[]; isDemo: boolean }
 export interface CorrectionPoint { value: string; correction: string }
 export interface ThermohygrometerCertificate { temperature: CorrectionPoint[]; humidity: CorrectionPoint[]; temperatureU95: string; humidityU95: string }
-export interface MeasuringDevice { id: string; name: string; brand: string; model: string; serial: string; isThermohygrometer: boolean; certificate: ThermohygrometerCertificate | null; isDemo: boolean }
+export interface WeighingStandardCalibration { nominalKg: string; uncertaintyU95G: string; conventionalMass2025G: string; conventionalMass2026G: string }
+export interface MeasuringDevice { id: string; name: string; brand: string; model: string; serial: string; isThermohygrometer: boolean; certificate: ThermohygrometerCertificate | null; weighingStandard?: WeighingStandardCalibration | null; isDemo: boolean }
 export interface TechnicianProfile { id: string; name: string; phone: string; isDemo: boolean }
 export interface EquipmentMethod { instrumentId: string; method: string }
 type AdminDirectory = { customers: Customer[]; devices: MeasuringDevice[]; technicians: TechnicianProfile[]; equipmentMethods: EquipmentMethod[]; seedVersion: number };
@@ -31,13 +33,20 @@ const demoDirectory: AdminDirectory = {
     ...thermohygrometers.slice(1).map((reference, index): MeasuringDevice => ({ id: `demo-device-thermo-${index + 2}`, name: 'Thermohygrometer', brand: 'Elitech', model: 'GSP-6', serial: reference.serial, isThermohygrometer: true, certificate: certificateFrom(reference), isDemo: true })),
     { id: 'demo-device-5', name: 'Vital Sign Simulator', brand: 'Gossen Metrawatt', model: 'Seculife BP Pro', serial: '735AE9911141', isThermohygrometer: false, certificate: null, isDemo: true },
     { id: 'demo-device-6', name: 'Gas Flow Analyzer', brand: 'IMT Medical', model: 'PF-300', serial: '2012BA104380', isThermohygrometer: false, certificate: null, isDemo: true },
+    ...adultScaleStandardWeights.map((weight, index): MeasuringDevice => ({
+      id: `demo-scale-weight-${index + 1}`, name: weight.name, brand: weight.brand, model: weight.model, serial: weight.serial,
+      isThermohygrometer: false, certificate: null, weighingStandard: {
+        nominalKg: String(weight.nominalKg), uncertaintyU95G: String(weight.uncertaintyU95G),
+        conventionalMass2025G: String(weight.conventionalMass2025G), conventionalMass2026G: String(weight.conventionalMass2026G),
+      }, isDemo: true,
+    })),
   ],
   technicians: [
     { id: 'demo-technician-1', name: 'Dina Teknisi Demo', phone: '0812-0000-0011', isDemo: true },
     { id: 'demo-technician-2', name: 'Rafi Teknisi Demo', phone: '0812-0000-0012', isDemo: true },
   ],
   equipmentMethods: [],
-  seedVersion: 3,
+  seedVersion: 4,
 };
 
 export type AdminDataContextValue = AdminDirectory & {
@@ -72,18 +81,27 @@ function parseDirectory(value: unknown): AdminDirectory {
   if (!Array.isArray(directory.customers) || !Array.isArray(directory.devices) || !Array.isArray(directory.technicians)) {
     throw new Error('Daftar data admin tidak lengkap.');
   }
-  const devices = directory.devices.map((item) => {
+  const devices: MeasuringDevice[] = directory.devices.map((item) => {
     const legacyDemo = item.isDemo && item.id === 'demo-device-2';
     const reference = thermohygrometers.find((thermo) => thermo.serial === item.serial) ?? (legacyDemo ? thermohygrometers[0] : undefined);
+    const weight = item.weighingStandard;
+    const validWeight = weight && typeof weight.nominalKg === 'string' && typeof weight.uncertaintyU95G === 'string'
+      && typeof weight.conventionalMass2025G === 'string' && typeof weight.conventionalMass2026G === 'string' ? weight : null;
     return {
       ...item,
       serial: legacyDemo && reference ? reference.serial : item.id === 'demo-device-1' && item.isDemo ? 'FC7267170003' : item.serial,
       isThermohygrometer: item.isThermohygrometer ?? Boolean(reference),
       certificate: item.certificate ?? (reference ? certificateFrom(reference) : null),
+      weighingStandard: validWeight,
     };
   });
   if (!directory.seedVersion || directory.seedVersion < 3) {
     for (const demoDevice of demoDirectory.devices) if (!devices.some((item) => item.id === demoDevice.id)) devices.push(demoDevice);
+  }
+  if (!directory.seedVersion || directory.seedVersion < 4) {
+    for (const demoDevice of demoDirectory.devices.filter((item) => item.weighingStandard)) {
+      if (!devices.some((item) => item.id === demoDevice.id)) devices.push(demoDevice);
+    }
   }
   return {
     customers: directory.customers,
@@ -92,7 +110,7 @@ function parseDirectory(value: unknown): AdminDirectory {
     equipmentMethods: Array.isArray(directory.equipmentMethods)
       ? directory.equipmentMethods.filter((entry): entry is EquipmentMethod => Boolean(entry && typeof entry.instrumentId === 'string' && typeof entry.method === 'string' && instruments.some((instrument) => instrument.id === entry.instrumentId)))
       : [],
-    seedVersion: 3,
+    seedVersion: 4,
   };
 }
 

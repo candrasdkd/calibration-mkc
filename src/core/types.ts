@@ -28,6 +28,31 @@ export interface InstrumentScore {
   physicalWeight: number;
 }
 
+export interface WeighingStandardWeight {
+  name: string;
+  brand: string;
+  model: string;
+  serial: string;
+  nominalKg: number;
+  uncertaintyU95G: number;
+  conventionalMass2025G: number;
+  conventionalMass2026G: number;
+}
+
+export interface WeighingTestPoint {
+  id: string;
+  loadKg: number;
+  defaultStandardWeightSerials: string[];
+}
+
+export interface WeighingScaleConfig {
+  capacityKg: number;
+  resolutionKg: number;
+  resolutionDivisor: 3 | 6;
+  repeatabilityLoadKg: number;
+  points: WeighingTestPoint[];
+}
+
 export interface PerformanceSetting {
   id: string;
   label: string;
@@ -49,6 +74,7 @@ export interface Instrument {
   performanceRows: PerformanceSetting[];
   references: MeasurementReferences;
   score: InstrumentScore;
+  weighingScale?: WeighingScaleConfig;
 }
 
 export interface IdentityData {
@@ -91,6 +117,24 @@ export interface PerformanceEntry extends PerformanceSetting {
   readings: string[];
 }
 
+export interface WeighingPointInput {
+  id: string;
+  zeroReading: string;
+  indication: string;
+  standardWeights: WeighingStandardWeight[];
+}
+
+export interface WeighingRepeatabilityInput {
+  zeroReading: string;
+  indication: string;
+}
+
+export interface WeighingData {
+  repeatabilityReadings: WeighingRepeatabilityInput[];
+  points: WeighingPointInput[];
+  standardsInitialized: boolean;
+}
+
 export interface SafetyData {
   voltage: string;
   earthType: string;
@@ -109,6 +153,7 @@ export interface CalibrationData {
   references: MeasurementReferences;
   inspections: InspectionEntry[];
   performance: PerformanceEntry[];
+  weighing?: WeighingData;
   safety: SafetyData;
 }
 
@@ -164,6 +209,39 @@ export interface PerformanceResultRow extends PerformanceEntry {
   result: CalculatedPerformance | null;
 }
 
+export interface WeighingPointResult {
+  id: string;
+  loadKg: number;
+  zeroReading: number | null;
+  indication: number | null;
+  standardWeightSerials: string[];
+  standardWeightsComplete: boolean;
+  referenceMassKg: number | null;
+  correction: number | null;
+  uncertaintyU95Kg: number | null;
+  complete: boolean;
+}
+
+export interface WeighingRepeatabilityResult {
+  zeroReading: number | null;
+  indication: number | null;
+  difference: number | null;
+}
+
+export interface WeighingResult {
+  repeatabilityMean: number | null;
+  repeatabilityStandardDeviation: number | null;
+  reportStandardDeviation: number;
+  repeatabilityReadings: WeighingRepeatabilityResult[];
+  points: WeighingPointResult[];
+  maxAbsoluteCorrection: number | null;
+  maxUncertaintyU95: number | null;
+  lop: number | null;
+  limit: number;
+  pass: boolean | null;
+  complete: boolean;
+}
+
 export interface InspectionResult extends InspectionEntry {
   complete: boolean;
   passed: boolean;
@@ -190,6 +268,7 @@ export interface CalculationResult {
   performance: PerformanceResultRow[];
   performanceRate: number | null;
   performanceScore: number | null;
+  weighing: WeighingResult | null;
   safety: SafetyResult | null;
   safetyScore: number | null;
   score: number | null;

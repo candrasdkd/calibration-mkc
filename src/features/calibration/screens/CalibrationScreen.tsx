@@ -23,9 +23,10 @@ import type {
   SafetyResult,
   SelectedMeasurementDevice,
   Thermohygrometer,
+  WeighingStandardWeight,
 } from '../../../core/types';
 
-const steps = ['Identitas', 'Pilih alat ukur', 'Pengujian', 'Hasil'];
+const steps = ['Identitas', 'Standar kalibrasi', 'Pengujian', 'Hasil'];
 
 
 
@@ -48,7 +49,7 @@ function StepTabs({ current, onChange }: { current: number; onChange: (step: num
       <View style={styles.progressLine}><View style={[styles.progressFill, { width: `${(current / (steps.length - 1)) * 100}%` }]} /></View>
       {steps.map((label, index) => <Pressable key={label} accessibilityRole="button" accessibilityState={{ selected: current === index }} onPress={() => onChange(index)} style={styles.stepNode}>
         <View style={[styles.stepCircle, index < current && styles.stepCircleDone, current === index && styles.stepCircleCurrent]}><Text style={[styles.stepNumber, (index <= current) && styles.stepNumberCurrent]}>{index + 1}</Text></View>
-        <Text style={[styles.stepLabel, current === index && styles.stepLabelCurrent]} numberOfLines={1}>{label === 'Pilih alat ukur' ? 'Alat ukur' : label}</Text>
+        <Text style={[styles.stepLabel, current === index && styles.stepLabelCurrent]} numberOfLines={1}>{label === 'Standar kalibrasi' ? 'Standar' : label}</Text>
       </Pressable>)}
     </View>
   </View>;
@@ -76,7 +77,7 @@ function CustomerPicker({ customers, value, loaded, onChange }: { customers: Cus
   </>;
 }
 
-function IdentityStep({ data, customers, loaded, update, selectCustomer }: { data: CalibrationData; customers: Customer[]; loaded: boolean; update: FieldUpdate; selectCustomer: (id: string) => void }) {
+function IdentityStep({ data, instrument, customers, loaded, update, selectCustomer }: { data: CalibrationData; instrument: Instrument; customers: Customer[]; loaded: boolean; update: FieldUpdate; selectCustomer: (id: string) => void }) {
   const fields: [keyof IdentityData, string][] = [
     ['labelNumber', 'Nomor label *'], ['brand', 'Merek *'],
     ['model', 'Tipe / model *'], ['serial', 'Nomor seri *'], ['capacity', 'Kapasitas'], ['accuracy', 'Tingkat ketelitian'],
@@ -84,8 +85,12 @@ function IdentityStep({ data, customers, loaded, update, selectCustomer }: { dat
     ['room', 'Ruang pelaksanaan *'], ['method', 'Metode kerja *'],
   ];
   return <>
-    <Card><Heading title="Identitas alat" hint="Isi nomor label, pelanggan, dan informasi alat. Metode kerja otomatis terisi dari data admin." />
-      {fields.slice(0, 6).map(([key, label]) => <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
+    <Card><Heading title="Alat yang dikalibrasi" hint="Isi identitas alat kesehatan yang diuji. Metode kerja otomatis mengikuti katalog kalibrasi." />
+      {fields.slice(0, instrument.weighingScale ? 4 : 6).map(([key, label]) => <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
+      {instrument.weighingScale ? <>
+        <ValueLine label="Kapasitas" value={`${instrument.weighingScale.capacityKg} kg`} />
+        <ValueLine label="Tingkat ketelitian" value={`${instrument.weighingScale.resolutionKg} kg`} />
+      </> : null}
     </Card>
     <Card><Heading title="Pelaksanaan dan pelanggan" hint="Pilih pelanggan yang sudah didaftarkan admin. Ketuk tanggal untuk membuka kalender." />
       {!loaded ? <Text style={styles.deviceHint}>Memuat data pelanggan…</Text> : customers.length ? <CustomerPicker customers={customers} value={data.identity.customerId || customers.find((customer) => customer.name === data.identity.customer)?.id || ''} loaded={loaded} onChange={selectCustomer} /> : <Text style={styles.errorText}>Belum ada data pelanggan. Admin perlu menambahkan pelanggan terlebih dahulu.</Text>}
@@ -93,7 +98,7 @@ function IdentityStep({ data, customers, loaded, update, selectCustomer }: { dat
       {fields.slice(6).map(([key, label]) => key.endsWith('Date')
         ? <DateField key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />
         : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} editable={key !== 'method'} multiline={key === 'method'} />)}
-      <Text style={styles.deviceHint}>Metode kerja dikelola admin di menu Data alat kesehatan.</Text>
+      <Text style={styles.deviceHint}>Metode kerja dikelola admin di menu Katalog kalibrasi.</Text>
     </Card>
   </>;
 }
@@ -119,47 +124,87 @@ function deviceSnapshot(device: MeasuringDevice): SelectedMeasurementDevice {
   return { id: device.id, name: device.name, brand: device.brand, model: device.model, serial: device.serial };
 }
 
+function weighingStandardSnapshot(device: MeasuringDevice): WeighingStandardWeight | null {
+  const standard = device.weighingStandard;
+  if (!standard) return null;
+  const numeric = (value: string) => value.trim() ? Number(value.replace(',', '.')) : Number.NaN;
+  const values = [standard.nominalKg, standard.uncertaintyU95G, standard.conventionalMass2025G, standard.conventionalMass2026G].map(numeric);
+  if (!values.every(Number.isFinite) || values[0] <= 0 || values[1] < 0 || values[2] <= 0 || values[3] <= 0) return null;
+  return {
+    name: device.name, brand: device.brand, model: device.model, serial: device.serial,
+    nominalKg: values[0], uncertaintyU95G: values[1], conventionalMass2025G: values[2], conventionalMass2026G: values[3],
+  };
+}
+
 const deviceNameKey = (name: string) => name.trim().toLowerCase();
 
-function SelectDevicesStep({ data, devices, loaded, onToggle, onReference }: {
+function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onReference, onToggleWeights }: {
+  instrument: Instrument;
   data: CalibrationData;
   devices: MeasuringDevice[];
   loaded: boolean;
   onToggle: (device: SelectedMeasurementDevice, profile: Thermohygrometer | null) => void;
   onReference: (profile: Thermohygrometer) => void;
+  onToggleWeights: (index: number, weights: WeighingStandardWeight[]) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [weightPickerPointId, setWeightPickerPointId] = useState<string | null>(null);
+  const [weightSearch, setWeightSearch] = useState('');
   const selected = data.selectedDevices ?? [];
-  const availableDevices = loaded ? devices : [];
+  const requirements = instrument.standards.map(([name]) => name);
+  const availableDevices = loaded ? devices.filter((device) => !device.weighingStandard
+    && requirements.some((name) => deviceNameKey(name) === deviceNameKey(device.name))) : [];
   const selectedIds = new Set(selected.map((device) => device.id));
   const normalizedSearch = search.trim().toLowerCase();
-  const deviceGroups = [...new Set(availableDevices.map((device) => deviceNameKey(device.name)))].map((key) => {
+  const deviceGroups = requirements.map((name) => {
+    const key = deviceNameKey(name);
     const groupDevices = availableDevices.filter((device) => deviceNameKey(device.name) === key);
-    const matchesName = groupDevices[0]?.name.toLowerCase().includes(normalizedSearch);
+    const matchesName = name.toLowerCase().includes(normalizedSearch);
     const matchingDevices = groupDevices.filter((device) => !normalizedSearch || matchesName
       || [device.serial, device.brand, device.model].some((value) => value.toLowerCase().includes(normalizedSearch)));
-    return { key, name: groupDevices[0]?.name ?? key, devices: matchingDevices, count: groupDevices.length };
+    return { key, name, devices: matchingDevices, count: groupDevices.length };
   }).filter((group) => group.devices.length);
   const thermometers = availableDevices.map((device) => ({ device, profile: thermohygrometerProfile(device) }))
     .filter((item) => selectedIds.has(item.device.id) && item.profile);
-  const missing = loaded ? selected.filter((device) => !devices.some((item) => item.id === device.id)) : [];
+  const missing = loaded ? selected.filter((device) => !availableDevices.some((item) => item.id === device.id)) : [];
   const matchingMissing = missing.filter((device) => !normalizedSearch
     || [device.name, device.brand, device.model, device.serial].some((value) => value.toLowerCase().includes(normalizedSearch)));
+  const weightPoints = instrument.weighingScale?.points ?? [];
+  const weighingStandards = loaded ? devices.map((device) => ({ device, standard: weighingStandardSnapshot(device) }))
+    .filter((item): item is { device: MeasuringDevice; standard: WeighingStandardWeight } => Boolean(item.standard)) : [];
+  const filteredWeights = weighingStandards.filter(({ device, standard }) => !weightSearch.trim()
+    || [device.name, device.brand, device.model, standard.serial, String(standard.nominalKg)].some((value) => value.toLowerCase().includes(weightSearch.trim().toLowerCase())));
+  const activeWeightPoint = weightPoints.find((point) => point.id === weightPickerPointId);
+  const activeWeightMeasurement = data.weighing?.points.find((point) => point.id === weightPickerPointId);
   return <>
     <Card>
-      <Heading title="Pilih alat ukur" hint="Pilih semua alat standar yang dipakai untuk pengerjaan ini. Alat yang sama hanya bisa dipilih satu kali." />
-      {!loaded ? <Text style={styles.deviceHint}>Memuat data alat ukur…</Text> : null}
-      {loaded && !devices.length ? <Text style={styles.deviceHint}>Belum ada alat ukur. Minta admin menambahkannya di menu Data alat ukur.</Text> : null}
-      <PickerField label="Alat ukur standar" value={selected.length ? `${selected.length} alat dipilih` : ''} placeholder="Pilih alat ukur" disabled={!loaded || !devices.length} onPress={() => { setSearch(''); setPickerOpen(true); }} />
+      <Heading title="Standar kalibrasi" hint={`Daftar mengikuti metode ${instrument.name}. Hanya jenis standar yang dibutuhkan metode ini yang ditampilkan.`} />
+      <ValueLine label="Standar wajib" value={[...requirements, ...(weightPoints.length ? ['Anak timbangan per titik beban'] : [])].join(' · ')} />
+      {!loaded ? <Text style={styles.deviceHint}>Memuat standar kalibrasi…</Text> : null}
+      {loaded && requirements.some((name) => !availableDevices.some((device) => deviceNameKey(device.name) === deviceNameKey(name))) ? <Text style={styles.deviceHint}>Ada standar wajib yang belum terdaftar. Admin perlu menambahkannya dengan nama jenis yang sesuai di menu Standar kalibrasi.</Text> : null}
+      <PickerField label="Standar umum" value={selected.length ? `${selected.length} standar dipilih` : ''} placeholder="Pilih standar yang dibutuhkan" disabled={!loaded || !availableDevices.length} onPress={() => { setSearch(''); setWeightPickerPointId(null); setPickerOpen(true); }} />
       {loaded && thermometers.length ? <Choice label="Thermohygrometer acuan kondisi lingkungan" value={thermometers.some(({ device }) => device.id === data.environment.standardId) ? data.environment.standardId : ''} options={thermometers.map(({ device }) => ({ value: device.id, label: device.serial }))} onChange={(id) => {
         const profile = thermometers.find(({ device }) => device.id === id)?.profile;
         if (profile) onReference(profile);
       }} /> : loaded ? <Text style={styles.deviceHint}>Pilih thermohygrometer yang data sertifikatnya lengkap untuk menghitung kondisi lingkungan.</Text> : null}
     </Card>
-    {selected.length ? <Card><Heading title={`Alat dipilih · ${selected.length}`} />{selected.map((device) => <ValueLine key={device.id} label={device.name} value={`${device.brand} · ${device.model} · ${device.serial}`} />)}</Card> : null}
-    <SearchPickerModal visible={pickerOpen} title="Pilih alat ukur" search={search} placeholder="Cari nama, merek, tipe, atau nomor seri" onSearch={setSearch} onClose={() => setPickerOpen(false)}>
+    {selected.length ? <Card><Heading title={`Standar dipilih · ${selected.length}`} />{selected.map((device) => <ValueLine key={device.id} label={device.name} value={`${device.brand} · ${device.model} · ${device.serial}`} />)}</Card> : null}
+    {weightPoints.length ? <Card><Heading title="Anak timbangan per beban" hint="Pilih kombinasi nomor seri hingga total massanya sama dengan titik uji." />
+      {weightPoints.map((point, index) => {
+        const measurement = data.weighing?.points.find((item) => item.id === point.id);
+        const weights = measurement?.standardWeights ?? [];
+        const total = weights.reduce((sum, weight) => sum + weight.nominalKg, 0);
+        const complete = Math.abs(total - point.loadKg) < 1e-6;
+        return <View key={point.id} style={styles.performanceCard}>
+          <View style={styles.performanceHeading}><Text style={styles.itemTitle}>{point.loadKg} kg</Text><Badge text={complete ? 'LENGKAP' : 'PILIH STANDAR'} tone={complete ? 'good' : 'wait'} /></View>
+          <PickerField label="Kombinasi anak timbangan" value={weights.length ? `${weights.map((weight) => `${weight.nominalKg} kg · ${weight.serial}`).join(' + ')} = ${fmt(total, 3)} kg` : ''} placeholder={`Pilih anak timbangan · total ${point.loadKg} kg`} disabled={!loaded || !weighingStandards.length} onPress={() => { setWeightSearch(''); setWeightPickerPointId(point.id); }} />
+          {!loaded ? <Text style={styles.deviceHint}>Memuat standar massa…</Text> : !weighingStandards.length ? <Text style={styles.deviceHint}>Admin perlu mendaftarkan anak timbangan di menu Standar kalibrasi.</Text> : null}
+        </View>;
+      })}
+    </Card> : null}
+    <SearchPickerModal visible={pickerOpen} title="Pilih standar kalibrasi" search={search} placeholder="Cari nama, merek, tipe, atau nomor seri" onSearch={setSearch} onClose={() => setPickerOpen(false)}>
             {deviceGroups.map((group) => {
               const expanded = expandedName === group.key || Boolean(search.trim());
               const chosenInGroup = selected.some((device) => deviceNameKey(device.name) === group.key);
@@ -179,7 +224,20 @@ function SelectDevicesStep({ data, devices, loaded, onToggle, onReference }: {
               </View>;
             })}
             {matchingMissing.map((device) => <PickerOption key={device.id} label={device.name} detail={`${device.brand} · ${device.model} · S/N ${device.serial}`} selected status="Hapus" statusTone="wait" onPress={() => onToggle(device, null)}><Text style={styles.deviceWarning}>Sudah dihapus dari data master. Ketuk untuk menghapus pilihan ini.</Text></PickerOption>)}
-            {!deviceGroups.length && !matchingMissing.length ? <Text style={styles.devicePickerEmpty}>{normalizedSearch ? 'Tidak ada alat yang cocok.' : 'Belum ada alat ukur.'}</Text> : null}
+            {!deviceGroups.length && !matchingMissing.length ? <Text style={styles.devicePickerEmpty}>{normalizedSearch ? 'Tidak ada standar yang cocok.' : 'Belum ada standar untuk metode ini.'}</Text> : null}
+    </SearchPickerModal>
+    <SearchPickerModal visible={Boolean(activeWeightPoint)} title={activeWeightPoint ? `Anak timbangan · ${activeWeightPoint.loadKg} kg` : 'Pilih anak timbangan'} search={weightSearch} placeholder="Cari nomor seri atau massa" onSearch={setWeightSearch} onClose={() => setWeightPickerPointId(null)}>
+      {activeWeightPoint ? filteredWeights.map(({ device, standard }, index) => {
+        const current = activeWeightMeasurement?.standardWeights ?? [];
+        const chosen = current.some((weight) => weight.serial === standard.serial);
+        const nextTotal = current.reduce((sum, weight) => sum + weight.nominalKg, 0) + (chosen ? 0 : standard.nominalKg);
+        const exceedsPoint = !chosen && nextTotal > activeWeightPoint.loadKg + 1e-6;
+        return <PickerOption key={device.id} index={index + 1} label={`${device.name} · ${standard.nominalKg} kg`} detail={`${device.brand} · ${device.model} · S/N ${standard.serial} · U95 ${standard.uncertaintyU95G} g`} selected={chosen} disabled={exceedsPoint} status={chosen ? 'Dipilih' : exceedsPoint ? 'Melebihi beban' : 'Pilih'} statusTone={chosen ? 'good' : exceedsPoint ? 'wait' : 'neutral'} accessory={device.isDemo ? <Badge text="Contoh" tone="wait" /> : null} onPress={() => {
+          const weights = chosen ? current.filter((weight) => weight.serial !== standard.serial) : [...current, standard];
+          onToggleWeights(weightPoints.findIndex((point) => point.id === activeWeightPoint.id), weights);
+        }} />;
+      }) : null}
+      {activeWeightPoint && !filteredWeights.length ? <Text style={styles.devicePickerEmpty}>{weightSearch.trim() ? 'Tidak ada anak timbangan yang cocok.' : 'Belum ada anak timbangan.'}</Text> : null}
     </SearchPickerModal>
   </>;
 }
@@ -189,7 +247,7 @@ function EnvironmentStep({ data, update, result }: { data: CalibrationData; upda
   const calculated = result.environment;
   return <>
     <Card>
-      <Heading title="Kondisi lingkungan" hint="Thermohygrometer acuan dipilih pada langkah Pilih alat ukur. Koreksi mengikuti tabel sertifikat yang tersimpan pada data alat ukur." />
+      <Heading title="Kondisi lingkungan" hint="Thermohygrometer acuan dipilih pada langkah Standar kalibrasi. Koreksi mengikuti tabel sertifikat pada data standar." />
       <ValueLine label="Thermohygrometer acuan" value={calculated.reference?.serial ?? 'Belum dipilih'} />
       {calculated.reference?.serial === 'EFG19BE02500' ? <Text style={styles.sourceWarning}>Workbook memuat koreksi RH +10,1% pada titik 50% untuk acuan ini. Nilai disalin apa adanya; verifikasi sertifikat sebelum digunakan.</Text> : null}
       <Field label="Suhu awal" value={environment.temperatureStart} onChange={(value) => update('environment', 'temperatureStart', value)} keyboard="decimal-pad" suffix="°C" />
@@ -289,19 +347,76 @@ function SafetyStep({ data, update, safetyResult }: { data: CalibrationData; upd
   </Card>;
 }
 
-function MeasurementStep({ data, instrument, result, update, updateInspection, updatePerformance }: {
+function WeighingStep({ instrument, data, result, updatePoint, updateRepeatability }: {
+  instrument: Instrument;
+  data: CalibrationData;
+  result: CalculationResult;
+  updatePoint: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
+  updateRepeatability: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
+}) {
+  const config = instrument.weighingScale;
+  const weighing = data.weighing;
+  const calculated = result.weighing;
+  if (!config || !weighing || !calculated) return null;
+  return <>
+    <Card>
+      <Heading title={`Uji berulang · ${config.repeatabilityLoadKg} kg`} hint="Masukkan nilai zero (z) dan penunjukan (m) sebanyak 10 kali. Selisih r = m − z dihitung otomatis." />
+      {weighing.repeatabilityReadings.map((reading, index) => <View key={index} style={styles.performanceCard}>
+        <Text style={styles.readingLabel}>Pengulangan {index + 1}</Text>
+        <View style={styles.settingRow}>
+          <View style={styles.settingField}><Field label="Zero (z)" value={reading.zeroReading} onChange={(value) => updateRepeatability(index, 'zeroReading', value)} keyboard="decimal-pad" suffix="kg" /></View>
+          <View style={styles.settingField}><Field label={`Bacaan ${config.repeatabilityLoadKg} kg (m)`} value={reading.indication} onChange={(value) => updateRepeatability(index, 'indication', value)} keyboard="decimal-pad" suffix="kg" /></View>
+        </View>
+      </View>)}
+      {calculated.repeatabilityMean !== null ? <View style={styles.inlineStats}>
+        <Text style={styles.inlineStat}>Rata-rata {fmt(calculated.repeatabilityMean, 4)} kg</Text>
+        <Text style={styles.inlineStat}>STDEV bacaan {fmt(calculated.repeatabilityStandardDeviation, 6)} kg</Text>
+        <Text style={styles.inlineStat}>Nilai SD laporan Excel {fmt(calculated.reportStandardDeviation, 6)} kg</Text>
+      </View> : null}
+    </Card>
+    <Card>
+      <Heading title="Pengujian beban" hint="Anak timbangan dipilih pada langkah Standar kalibrasi. Masukkan bacaan nol dan bacaan berbeban di setiap titik." />
+      {config.points.map((point, index) => {
+        const measurement = weighing.points.find((item) => item.id === point.id);
+        const output = calculated.points[index];
+        const selectedWeights = measurement?.standardWeights ?? [];
+        const selectedMass = selectedWeights.reduce((sum, weight) => sum + weight.nominalKg, 0);
+        return <View key={point.id} style={styles.performanceCard}>
+          <View style={styles.performanceHeading}>
+            <Text style={styles.itemTitle}>Beban {point.loadKg} kg</Text>
+            <Badge text={output?.complete ? 'LENGKAP' : output && !output.standardWeightsComplete ? 'ATUR ANAK TIMBANGAN' : 'ISI BACAAN'} tone={output?.complete ? 'good' : 'wait'} />
+          </View>
+          <Text style={styles.readingsHint}>Standar massa · {selectedWeights.length ? `${selectedWeights.map((weight) => `${weight.nominalKg} kg · ${weight.serial}`).join(' + ')} = ${fmt(selectedMass, 3)} kg` : 'Belum dipilih'}</Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingField}><Field label="Bacaan nol" value={measurement?.zeroReading ?? ''} onChange={(value) => updatePoint(index, 'zeroReading', value)} keyboard="decimal-pad" suffix="kg" /></View>
+            <View style={styles.settingField}><Field label="Bacaan berbeban" value={measurement?.indication ?? ''} onChange={(value) => updatePoint(index, 'indication', value)} keyboard="decimal-pad" suffix="kg" /></View>
+          </View>
+          {output ? <View style={styles.inlineStats}>
+            <Text style={styles.inlineStat}>Massa acuan {fmt(output.referenceMassKg, 5)} kg</Text>
+            <Text style={styles.inlineStat}>Koreksi {fmt(output.correction, 5)} kg</Text>
+            <Text style={styles.inlineStat}>U95 {fmt(output.uncertaintyU95Kg, 5)} kg</Text>
+          </View> : null}
+        </View>;
+      })}
+    </Card>
+  </>;
+}
+
+function MeasurementStep({ data, instrument, result, update, updateInspection, updatePerformance, updateWeighingPoint, updateWeighingRepeatability }: {
   data: CalibrationData;
   instrument: Instrument;
   result: CalculationResult;
   update: FieldUpdate;
   updateInspection: InspectionUpdate;
   updatePerformance: PerformanceUpdate;
+  updateWeighingPoint: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
+  updateWeighingRepeatability: (index: number, key: 'zeroReading' | 'indication', value: string) => void;
 }) {
   return <>
     <EnvironmentStep data={data} update={update} result={result} />
     <InspectionStep data={data} updateInspection={updateInspection} />
     {instrument.id === 'centrifuge' ? <SafetyStep data={data} update={update} safetyResult={result.safety} /> : null}
-    <Card>
+    {instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} /> : <Card>
       <Heading title="Pengujian kinerja" hint={instrument.id === 'flowmeter' ? 'Workbook menampilkan ±20% pada label, tetapi rumus ambang di sel menggunakan 10%. Perhitungan aplikasi mengikuti rumus 10%.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
       {data.performance.map((row, rowIndex) => {
         const calculated = result.performance[rowIndex].result;
@@ -325,7 +440,7 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
           {calculated ? <View style={styles.inlineStats}><Text style={styles.inlineStat}>Rata-rata {fmt(calculated.mean)}</Text><Text style={styles.inlineStat}>Koreksi {fmt(calculated.correction)}</Text><Text style={styles.inlineStat}>U95 {fmt(calculated.u95)}</Text></View> : null}
         </View>;
       })}
-    </Card>
+    </Card>}
   </>;
 }
 
@@ -348,8 +463,8 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
       <ValueLine label="Pengujian kinerja" value={result.performanceScore === null ? 'Belum lengkap' : `${result.performanceScore} / ${instrument.score.performanceWeight}`} />
       {result.performanceRate !== null ? <ValueLine label="Titik kinerja lulus" value={`${result.performanceRate.toFixed(0)}%`} /> : null}
     </Card>
-    <Card><Heading title="Alat ukur yang dipilih" />
-      {(data.selectedDevices ?? []).length ? (data.selectedDevices ?? []).map((device) => <ValueLine key={device.id} label={device.name} value={`${device.brand} · ${device.model} · ${device.serial}`} />) : <Text style={styles.deviceHint}>Belum memilih alat ukur.</Text>}
+    <Card><Heading title="Standar kalibrasi yang dipakai" />
+      {(data.selectedDevices ?? []).length ? (data.selectedDevices ?? []).map((device) => <ValueLine key={device.id} label={device.name} value={`${device.brand} · ${device.model} · ${device.serial}`} />) : <Text style={styles.deviceHint}>Standar umum belum dipilih.</Text>}
     </Card>
     <Card><Heading title="Lingkungan terkoreksi" />
       <ValueLine label="Thermohygrometer acuan" value={result.environment.reference?.serial} />
@@ -359,14 +474,30 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
     {result.safety ? <Card><Heading title="Keselamatan listrik" />
       {result.safety.checks.map((item) => <View key={item.label} style={styles.resultLine}><Text style={styles.resultLabel}>{item.label}</Text><Badge text={item.result === null ? 'KOSONG' : item.result ? 'LULUS' : 'TIDAK LULUS'} tone={item.result === null ? 'wait' : item.result ? 'good' : 'bad'} /></View>)}
     </Card> : null}
-    <Card><Heading title="Hasil tiap titik kinerja" />
+    {result.weighing ? <Card><Heading title="Hasil pengujian timbangan" />
+      <ValueLine label="Rata-rata uji berulang" value={result.weighing.repeatabilityMean === null ? 'Belum lengkap' : `${fmt(result.weighing.repeatabilityMean, 4)} kg`} />
+      <ValueLine label="STDEV 10 bacaan" value={result.weighing.repeatabilityStandardDeviation === null ? 'Belum lengkap' : `${fmt(result.weighing.repeatabilityStandardDeviation, 6)} kg`} />
+      <ValueLine label="Nilai SD pada laporan Excel" value={`${fmt(result.weighing.reportStandardDeviation, 6)} kg`} />
+      <ValueLine label="Koreksi absolut maksimum" value={result.weighing.maxAbsoluteCorrection === null ? 'Belum lengkap' : `${fmt(result.weighing.maxAbsoluteCorrection, 5)} kg`} />
+      <ValueLine label="U95 maksimum" value={result.weighing.maxUncertaintyU95 === null ? 'Belum lengkap' : `${fmt(result.weighing.maxUncertaintyU95, 5)} kg`} />
+      <ValueLine label="LOP / batas 10 × resolusi" value={result.weighing.lop === null ? 'Belum lengkap' : `${fmt(result.weighing.lop, 5)} / ${fmt(result.weighing.limit, 2)} kg`} />
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Hasil LOP</Text><Badge text={result.weighing.pass === null ? 'MENUNGGU' : result.weighing.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.weighing.pass === null ? 'wait' : result.weighing.pass ? 'good' : 'bad'} /></View>
+      {result.weighing.points.map((point) => <View key={point.id} style={styles.resultPerformance}>
+        <View style={styles.resultLine}><Text style={styles.resultLabel}>Beban {point.loadKg} kg</Text><Text style={styles.resultTiny}>{point.standardWeightSerials.join(' + ')}</Text></View>
+        <ValueLine label="Bacaan nol" value={point.zeroReading === null ? '—' : `${fmt(point.zeroReading, 4)} kg`} />
+        <ValueLine label="Bacaan berbeban" value={point.indication === null ? '—' : `${fmt(point.indication, 4)} kg`} />
+        <ValueLine label="Massa konvensional" value={`${fmt(point.referenceMassKg, 5)} kg`} />
+        <ValueLine label="Koreksi" value={point.correction === null ? '—' : `${fmt(point.correction, 5)} kg`} />
+        <ValueLine label="U95" value={`${fmt(point.uncertaintyU95Kg, 5)} kg`} />
+      </View>)}
+    </Card> : <Card><Heading title="Hasil tiap titik kinerja" />
       {result.performance.map((row) => <View key={row.id} style={styles.resultPerformance}>
         <View style={styles.resultLine}><Text style={styles.resultLabel}>{row.setting} {row.unit}</Text><Badge text={row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : 'KOSONG'} tone={row.result ? row.result.pass ? 'good' : 'bad' : 'wait'} /></View>
         <ValueLine label="Rata-rata" value={row.result ? fmt(row.result.mean) : '—'} />
         <ValueLine label="Koreksi" value={row.result ? fmt(row.result.correction) : '—'} />
         <ValueLine label="Koreksi + U95 / toleransi" value={row.result ? `${fmt(row.result.testValue)} / ${fmt(row.result.tolerance)}` : '—'} />
       </View>)}
-    </Card>
+    </Card>}
   </>;
 }
 
@@ -390,7 +521,22 @@ export default function CalibrationScreen() {
     const legacyThermohygrometer = devices.find((device) => device.serial === data.environment.standardId);
     const legacyReference = legacyThermohygrometer ? thermohygrometerProfile(legacyThermohygrometer) : null;
     const needsMigration = data.identity.customerId === undefined || data.selectedDevices === undefined || data.environment.reference === undefined || Boolean(missingMethod);
-    if (!needsMigration) return;
+    const needsWeightInitialization = Boolean(instrument.weighingScale && data.weighing && !data.weighing.standardsInitialized);
+    if (!needsMigration && !needsWeightInitialization) return;
+    const weighing = needsWeightInitialization && data.weighing && instrument.weighingScale ? {
+      ...data.weighing,
+      points: data.weighing.points.map((point) => {
+        const setting = instrument.weighingScale?.points.find((item) => item.id === point.id);
+        if (!setting || point.standardWeights?.length) return point;
+        const standardWeights = setting.defaultStandardWeightSerials.flatMap((serial) => {
+          const device = devices.find((item) => item.serial === serial);
+          const standard = device ? weighingStandardSnapshot(device) : null;
+          return standard ? [standard] : [];
+        });
+        return { ...point, standardWeights };
+      }),
+      standardsInitialized: true,
+    } : data.weighing;
     updateRecord(record.id, { data: {
       ...data,
       identity: data.identity.customerId === undefined || missingMethod ? { ...data.identity, ...(data.identity.customerId === undefined ? { customerId: legacyCustomer?.id ?? '' } : {}), ...(missingMethod ? { method: configuredMethod } : {}) } : data.identity,
@@ -398,6 +544,7 @@ export default function CalibrationScreen() {
       environment: data.environment.reference === undefined
         ? { ...data.environment, standardId: legacyReference?.id ?? data.environment.standardId, reference: legacyReference }
         : data.environment,
+      ...(weighing ? { weighing } : {}),
     } });
   }, [customers, data, devices, directoryLoaded, equipmentMethods, instrument, record, updateRecord]);
 
@@ -454,15 +601,30 @@ export default function CalibrationScreen() {
     });
     updateRecord(record.id, { data: { ...data, performance } });
   };
+  const updateWeighingPoint = (index: number, key: 'zeroReading' | 'indication', value: string) => {
+    if (!data.weighing) return;
+    const points = data.weighing.points.map((point, pointIndex) => pointIndex === index ? { ...point, [key]: value } : point);
+    updateRecord(record.id, { data: { ...data, weighing: { ...data.weighing, points } } });
+  };
+  const updateWeighingRepeatability = (index: number, key: 'zeroReading' | 'indication', value: string) => {
+    if (!data.weighing) return;
+    const repeatabilityReadings = data.weighing.repeatabilityReadings.map((reading, readingIndex) => readingIndex === index ? { ...reading, [key]: value } : reading);
+    updateRecord(record.id, { data: { ...data, weighing: { ...data.weighing, repeatabilityReadings } } });
+  };
+  const updateWeighingWeights = (index: number, standardWeights: WeighingStandardWeight[]) => {
+    if (!data.weighing) return;
+    const points = data.weighing.points.map((point, pointIndex) => pointIndex === index ? { ...point, standardWeights } : point);
+    updateRecord(record.id, { data: { ...data, weighing: { ...data.weighing, points } } });
+  };
   return <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
     <ScreenHeader instrument={instrument} onBack={() => router.replace('/')} onFormula={() => router.push(`/rumus?recordId=${record.id}`)} />
     <StepTabs current={step} onChange={setStep} />
     {storageError ? <View style={styles.storageMessage}><Text style={styles.storageMessageText}>{storageError}</Text></View> : null}
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {step === 0 ? <IdentityStep data={data} customers={customers} loaded={directoryLoaded} update={update} selectCustomer={selectCustomer} /> : null}
-        {step === 1 ? <SelectDevicesStep data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} /> : null}
-        {step === 2 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} /> : null}
+        {step === 0 ? <IdentityStep data={data} instrument={instrument} customers={customers} loaded={directoryLoaded} update={update} selectCustomer={selectCustomer} /> : null}
+        {step === 1 ? <SelectDevicesStep instrument={instrument} data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} onToggleWeights={updateWeighingWeights} /> : null}
+        {step === 2 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} /> : null}
         {step === 3 ? <ResultStep data={data} result={result} instrument={instrument} /> : null}
         <View style={styles.navigationButtons}>
           {step > 0 ? <View style={styles.navButton}><ActionButton title="Sebelumnya" secondary onPress={() => setStep(step - 1)} /></View> : <View style={styles.navButton}><ActionButton title="Selesai" secondary onPress={() => router.replace('/')} /></View>}

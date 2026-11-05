@@ -12,6 +12,9 @@ import type {
   SafetyData,
   SafetyResult,
   ThermohygrometerPoint,
+  WeighingData,
+  WeighingResult,
+  WeighingStandardWeight,
 } from './types';
 
 const number = (value: unknown): number | null => {
@@ -33,6 +36,89 @@ function sampleStandardDeviation(values: number[]): number {
   if (values.length < 2) return 0;
   const mean = average(values);
   return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
+}
+
+function studentTCritical95(degreesOfFreedom: number): number {
+  const z = 1.959963984540054;
+  const v = degreesOfFreedom;
+  return z
+    + (z ** 3 + z) / (4 * v)
+    + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * v ** 2)
+    + (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z) / (384 * v ** 3)
+    + (79 * z ** 9 + 776 * z ** 7 + 1482 * z ** 5 - 1920 * z ** 3 - 945 * z) / (92160 * v ** 4);
+}
+
+function calculateWeighing(instrument: Instrument, data?: WeighingData): WeighingResult | null {
+  const config = instrument.weighingScale;
+  if (!config) return null;
+  const repeatabilityReadings = Array.isArray(data?.repeatabilityReadings) ? data.repeatabilityReadings.map((reading) => {
+    const zeroReading = number(reading.zeroReading);
+    const indication = number(reading.indication);
+    return { zeroReading, indication, difference: zeroReading === null || indication === null ? null : indication - zeroReading };
+  }) : [];
+  const repeatedReadings = repeatabilityReadings.map((reading) => reading.difference);
+  const repeatabilityComplete = repeatabilityReadings.length === 10 && repeatabilityReadings.every((reading) => reading.zeroReading !== null && reading.indication !== null);
+  const validRepeatedReadings = repeatedReadings.filter((value): value is number => value !== null);
+  const inputPoints = Array.isArray(data?.points) ? data.points : [];
+  const points = config.points.map((setting) => {
+    const input = inputPoints.find((point) => point.id === setting.id);
+    const zeroReading = number(input?.zeroReading);
+    const indication = number(input?.indication);
+    const weights = Array.isArray(input?.standardWeights) ? input.standardWeights : [];
+    const validWeights = weights.filter((weight): weight is WeighingStandardWeight => Boolean(weight && typeof weight.serial === 'string' && typeof weight.name === 'string'
+      && typeof weight.brand === 'string' && typeof weight.model === 'string'
+      && weight.serial.trim() && weight.name.trim() && weight.brand.trim() && weight.model.trim()
+      && Number.isFinite(weight.nominalKg) && weight.nominalKg > 0
+      && Number.isFinite(weight.uncertaintyU95G) && weight.uncertaintyU95G >= 0
+      && Number.isFinite(weight.conventionalMass2025G) && weight.conventionalMass2025G > 0
+      && Number.isFinite(weight.conventionalMass2026G) && weight.conventionalMass2026G > 0));
+    const weightDataComplete = weights.length > 0 && validWeights.length === weights.length;
+    const nominalLoadKg = validWeights.reduce((sum, weight) => sum + weight.nominalKg, 0);
+    const weightsComplete = weightDataComplete && new Set(validWeights.map((weight) => weight.serial)).size === validWeights.length
+      && Math.abs(nominalLoadKg - setting.loadKg) < 1e-6;
+    const referenceMassKg = weightDataComplete ? validWeights.reduce((sum, weight) => sum + weight.conventionalMass2026G / 1000, 0) : null;
+    const certificateU95G = validWeights.reduce((sum, weight) => sum + weight.uncertaintyU95G, 0);
+    const driftG = validWeights.reduce((sum, weight) => sum + (0.5 * (weight.conventionalMass2026G - weight.conventionalMass2025G)) / Math.sqrt(3), 0);
+    const uResolution = (0.5 * config.resolutionKg) / Math.sqrt(config.resolutionDivisor);
+    const uRepeatability = (0.5 * config.resolutionKg) / 2;
+    const uCertificate = (certificateU95G / 2) / 1000;
+    const uDrift = (driftG / Math.sqrt(3)) / 1000;
+    const components = [uResolution, uRepeatability, uCertificate, uDrift];
+    const variance = components.reduce((sum, component) => sum + component ** 2, 0);
+    const dofDenominator = components.reduce((sum, component) => sum + component ** 4 / 50, 0);
+    const effectiveDof = dofDenominator > 0 ? variance ** 2 / dofDenominator : Number.POSITIVE_INFINITY;
+    const uncertaintyU95Kg = weightDataComplete ? Math.sqrt(variance) * studentTCritical95(effectiveDof) : null;
+    const complete = weightsComplete && zeroReading !== null && indication !== null;
+    return {
+      id: setting.id,
+      loadKg: setting.loadKg,
+      zeroReading,
+      indication,
+      standardWeightSerials: validWeights.map((weight) => weight.serial),
+      standardWeightsComplete: weightsComplete,
+      referenceMassKg,
+      correction: indication === null || referenceMassKg === null ? null : indication - referenceMassKg,
+      uncertaintyU95Kg,
+      complete,
+    };
+  });
+  const complete = repeatabilityComplete && points.length === config.points.length && points.every((point) => point.complete);
+  const maxAbsoluteCorrection = complete ? Math.max(...points.map((point) => Math.abs(point.correction ?? 0))) : null;
+  const maxUncertaintyU95 = complete ? Math.max(...points.map((point) => point.uncertaintyU95Kg ?? 0)) : null;
+  const lop = maxAbsoluteCorrection === null || maxUncertaintyU95 === null ? null : maxAbsoluteCorrection + maxUncertaintyU95;
+  return {
+    repeatabilityMean: repeatabilityComplete ? average(validRepeatedReadings) : null,
+    repeatabilityStandardDeviation: repeatabilityComplete ? sampleStandardDeviation(validRepeatedReadings) : null,
+    reportStandardDeviation: Math.sqrt(2 / 3) * (0.5 * config.resolutionKg),
+    repeatabilityReadings,
+    points,
+    maxAbsoluteCorrection,
+    maxUncertaintyU95,
+    lop,
+    limit: 10 * config.resolutionKg,
+    pass: lop === null ? null : lop <= 10 * config.resolutionKg,
+    complete,
+  };
 }
 
 function interpolate(value: number, table: ThermohygrometerPoint[]): number | null {
@@ -173,6 +259,7 @@ function calculateSafety(safety: SafetyData): SafetyResult {
 
 export function calculateRecord(instrument: Instrument, data: CalibrationData): CalculationResult {
   const environment = calculateEnvironment(data);
+  const weighing = calculateWeighing(instrument, data.weighing);
   const performance = data.performance.map((row) => ({
     ...row,
     result: calculatePerformanceRow(row, data.references),
@@ -184,17 +271,21 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   }));
   const inspectionComplete = inspections.every((item) => item.complete);
   const inspectionRate = inspectionComplete
-    ? (inspections.filter((item) => item.passed).length / inspections.length) * 100
+    ? weighing
+      ? (inspections.reduce((sum, item) => sum + Number(item.physical === 'Baik') + Number(item.function === 'Baik'), 0) / (inspections.length * 2)) * 100
+      : (inspections.filter((item) => item.passed).length / inspections.length) * 100
     : null;
-  const physicalScore = inspectionRate === null ? null : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
-  const safety = instrument.id === 'centrifuge' ? calculateSafety(data.safety) : null;
-  const performanceComplete = performance.length > 0 && performance.every((row) => row.result !== null);
-  const performanceRate = performanceComplete
-    ? (performance.filter((row) => row.result?.pass === true).length / performance.length) * 100
-    : null;
-  const performanceScore = performanceRate === null
+  const physicalScore = inspectionRate === null
     ? null
-    : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
+    : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
+  const safety = instrument.id === 'centrifuge' ? calculateSafety(data.safety) : null;
+  const performanceComplete = weighing ? weighing.complete : performance.length > 0 && performance.every((row) => row.result !== null);
+  const performanceRate = weighing
+    ? weighing.pass === null ? null : weighing.pass ? 100 : 0
+    : performanceComplete ? (performance.filter((row) => row.result?.pass === true).length / performance.length) * 100 : null;
+  const performanceScore = weighing
+    ? weighing.pass === null ? null : weighing.pass ? instrument.score.performanceWeight : 0
+    : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
   const safetyScore = safety ? safety.score : 0;
   const score = physicalScore !== null && performanceScore !== null && safetyScore !== null
     ? physicalScore + performanceScore + safetyScore
@@ -210,15 +301,25 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     if (!String(identity[key] || '').trim()) missing.push(label);
   }
   if (identity.testDate && !validDate(identity.testDate)) missing.push('Tanggal pelaksanaan harus valid dan berformat YYYY-MM-DD');
-  if (data.selectedDevices && !data.selectedDevices.length) missing.push('Alat ukur yang digunakan');
+  const selectedStandardNames = new Set((data.selectedDevices?.map((device) => device.name) ?? instrument.standards.map(([name]) => name))
+    .map((name) => name.trim().toLowerCase()));
+  for (const [name] of instrument.standards) {
+    if (!selectedStandardNames.has(name.trim().toLowerCase())) missing.push(`Standar wajib: ${name}`);
+  }
   if (!environment.temperature || !environment.humidity) missing.push('Data suhu dan kelembaban ruangan');
   if (environment.errors.length) missing.push(...environment.errors);
   if (!inspectionComplete) missing.push('Pemeriksaan fisik dan fungsi');
-  if (!performanceComplete) missing.push('Titik ukur, bacaan, dan ketidakpastian kinerja');
+  if (weighing) {
+    if (weighing.repeatabilityMean === null) missing.push('10 bacaan uji berulang timbangan');
+    for (const point of weighing.points) {
+      if (!point.standardWeightsComplete) missing.push(`Pilih anak timbangan dengan total ${point.loadKg} kg`);
+      if (point.zeroReading === null || point.indication === null) missing.push(`Bacaan nol dan penunjukan untuk beban ${point.loadKg} kg`);
+    }
+  } else if (!performanceComplete) missing.push('Titik ukur, bacaan, dan ketidakpastian kinerja');
   if (safety && !safety.complete) missing.push('Semua pemeriksaan keselamatan listrik');
   const referenceValues = [data.references.calibratorResolution, data.references.calibratorUncertainty, data.references.uutResolution].map(number);
   const validReferenceValues = referenceValues.filter((value): value is number => value !== null);
-  if (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0) {
+  if (!weighing && (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0)) {
     missing.push('Resolusi dan ketidakpastian standar harus valid');
   }
 
@@ -230,6 +331,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     performance,
     performanceRate,
     performanceScore,
+    weighing,
     safety,
     safetyScore,
     score,

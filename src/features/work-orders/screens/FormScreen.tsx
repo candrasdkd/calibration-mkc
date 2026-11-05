@@ -21,11 +21,11 @@ export function FormScreen() {
     const id = createRecord(instrumentId, method);
     if (id) router.push(`/calibration/${id}`);
   };
-  return <ScreenPage title="Form pengerjaan" hint="Pilih jenis alat yang sudah disiapkan admin. Metode kerja akan terisi otomatis di formulir.">
+  return <ScreenPage title="Mulai kalibrasi" hint="Pilih jenis kalibrasi dari katalog Admin. Metode kerja akan terisi otomatis.">
     {storageError || directory.storageError ? <Card style={styles.storageWarning}><Text style={styles.warningText}>{storageError || directory.storageError}</Text></Card> : null}
-    {!directory.loaded ? <Card><Text style={styles.emptyText}>Memuat jenis alat…</Text></Card> : null}
-    {directory.loaded && !availableInstruments.length ? <Card style={styles.emptyCard}><Text style={styles.emptyTitle}>Jenis alat belum tersedia</Text><Text style={styles.emptyText}>Minta admin menambahkan jenis alat dan mengisi metode kerjanya di menu Data alat kesehatan.</Text></Card> : null}
-    {availableInstruments.length ? <Text style={styles.selectionEyebrow}>JENIS ALAT TERSEDIA · {availableInstruments.length}</Text> : null}
+    {!directory.loaded ? <Card><Text style={styles.emptyText}>Memuat katalog kalibrasi…</Text></Card> : null}
+    {directory.loaded && !availableInstruments.length ? <Card style={styles.emptyCard}><Text style={styles.emptyTitle}>Katalog kalibrasi belum tersedia</Text><Text style={styles.emptyText}>Minta admin menyiapkan jenis alat dan metode di menu Katalog kalibrasi.</Text></Card> : null}
+    {availableInstruments.length ? <Text style={styles.selectionEyebrow}>JENIS KALIBRASI TERSEDIA · {availableInstruments.length}</Text> : null}
     <View style={styles.instrumentGrid}>{availableInstruments.map(({ instrument, method }, index) => <Pressable
       key={instrument.id}
       accessibilityRole="button"

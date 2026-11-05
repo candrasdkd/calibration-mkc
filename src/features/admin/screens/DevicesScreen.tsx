@@ -3,7 +3,7 @@ import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Te
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ActionButton, Badge, Card, Choice, ConfirmModal, Field, Heading } from '../../../components/ui';
 import { useAdminData } from '../hooks/useAdminData';
-import type { MeasuringDevice, ThermohygrometerCertificate } from '../../../core/admin-data';
+import type { MeasuringDevice, ThermohygrometerCertificate, WeighingStandardCalibration } from '../../../core/admin-data';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { StorageMessage } from '../components/StorageMessage';
 import { styles } from '../styles/AdminStyles';
@@ -15,7 +15,8 @@ const blankCertificate = (): ThermohygrometerCertificate => ({
   temperatureU95: '', humidityU95: '',
 });
 
-const blankDevice = (): MeasuringDevice => ({ id: '', name: '', brand: '', model: '', serial: '', isThermohygrometer: false, certificate: null, isDemo: false });
+const blankWeighingStandard = (): WeighingStandardCalibration => ({ nominalKg: '', uncertaintyU95G: '', conventionalMass2025G: '', conventionalMass2026G: '' });
+const blankDevice = (): MeasuringDevice => ({ id: '', name: '', brand: '', model: '', serial: '', isThermohygrometer: false, certificate: null, weighingStandard: null, isDemo: false });
 
 export function DevicesScreen() {
   const data = useAdminData();
@@ -30,13 +31,16 @@ export function DevicesScreen() {
   });
   const editDevice = (device: MeasuringDevice) => {
     setSelectedSerial(null);
-    setEditing({ ...device, certificate: device.certificate ? { ...device.certificate, temperature: device.certificate.temperature.map((point) => ({ ...point })), humidity: device.certificate.humidity.map((point) => ({ ...point })) } : device.isThermohygrometer ? blankCertificate() : null });
+    setEditing({ ...device, certificate: device.certificate ? { ...device.certificate, temperature: device.certificate.temperature.map((point) => ({ ...point })), humidity: device.certificate.humidity.map((point) => ({ ...point })) } : device.isThermohygrometer ? blankCertificate() : null, weighingStandard: device.weighingStandard ? { ...device.weighingStandard } : null });
   };
   const updateCertificate = (update: (certificate: ThermohygrometerCertificate) => ThermohygrometerCertificate) => setEditing((current) => current
     ? { ...current, certificate: update(current.certificate ?? blankCertificate()) }
     : current);
+  const updateWeighingStandard = (update: (standard: WeighingStandardCalibration) => WeighingStandardCalibration) => setEditing((current) => current
+    ? { ...current, weighingStandard: update(current.weighingStandard ?? blankWeighingStandard()) }
+    : current);
   const save = () => {
-    if (!editing?.name.trim() || !editing.brand.trim() || !editing.model.trim() || !editing.serial.trim()) { Alert.alert('Data belum lengkap', 'Isi nama alat, merek, tipe, dan nomor seri.'); return; }
+    if (!editing?.name.trim() || !editing.brand.trim() || !editing.model.trim() || !editing.serial.trim()) { Alert.alert('Data belum lengkap', 'Isi nama jenis standar, merek, tipe, dan nomor seri.'); return; }
     if (data.devices.some((device) => device.id !== editing.id && device.serial.trim().toLowerCase() === editing.serial.trim().toLowerCase())) { Alert.alert('Nomor seri sudah terdaftar', 'Gunakan data alat yang sudah ada, atau periksa kembali nomor seri.'); return; }
     if (editing.isThermohygrometer) {
       const certificate = editing.certificate;
@@ -50,14 +54,24 @@ export function DevicesScreen() {
         Alert.alert('Data sertifikat belum lengkap', 'Isi minimal dua titik suhu dan kelembaban berurutan, koreksi setiap titik, serta nilai U95.'); return;
       }
     }
+    if (editing.weighingStandard) {
+      const numeric = (value: string) => value.trim() ? Number(value.replace(',', '.')) : Number.NaN;
+      const { nominalKg, uncertaintyU95G, conventionalMass2025G, conventionalMass2026G } = editing.weighingStandard;
+      if (!Number.isFinite(numeric(nominalKg)) || numeric(nominalKg) <= 0
+        || !Number.isFinite(numeric(uncertaintyU95G)) || numeric(uncertaintyU95G) < 0
+        || !Number.isFinite(numeric(conventionalMass2025G)) || numeric(conventionalMass2025G) <= 0
+        || !Number.isFinite(numeric(conventionalMass2026G)) || numeric(conventionalMass2026G) <= 0) {
+        Alert.alert('Data sertifikat massa belum lengkap', 'Isi massa nominal, U95, massa konvensional 2025, dan massa konvensional 2026 dengan angka yang valid.'); return;
+      }
+    }
     const device = editing;
-    setConfirmation({ title: device.id ? 'Simpan perubahan alat ukur?' : 'Tambahkan alat ukur?', message: `${device.name} akan tersedia di daftar pilihan teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveDevice(device); setEditing(null); setExpandedName(device.name.trim().toLowerCase()); setSelectedSerial(device.id || null); } });
+    setConfirmation({ title: device.id ? 'Simpan perubahan standar?' : 'Tambahkan standar?', message: `${device.name} akan tersedia sesuai kebutuhan metode kalibrasi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveDevice(device); setEditing(null); setExpandedName(device.name.trim().toLowerCase()); setSelectedSerial(device.id || null); } });
   };
-  const remove = (device: MeasuringDevice) => setConfirmation({ title: 'Hapus alat ukur?', message: `${device.name} · ${device.serial} akan dihapus dari daftar.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => { data.deleteDevice(device.id); setSelectedSerial(null); } });
-  return <ScreenPage title="Data alat ukur" hint="Kelola alat standar yang digunakan teknisi.">
+  const remove = (device: MeasuringDevice) => setConfirmation({ title: 'Hapus standar?', message: `${device.name} · ${device.serial} akan dihapus dari daftar standar.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => { data.deleteDevice(device.id); setSelectedSerial(null); } });
+  return <ScreenPage title="Standar kalibrasi" hint="Kelola alat ukur standar dan data sertifikatnya. Teknisi hanya melihat standar yang diminta metode.">
     <StorageMessage message={data.storageError} />
-    <ActionButton title="＋ Tambah alat ukur" onPress={() => setEditing(blankDevice())} disabled={locked} />
-    <Text style={styles.groupInstruction}>Pilih nama alat untuk melihat nomor seri yang terdaftar.</Text>
+    <ActionButton title="＋ Tambah standar" onPress={() => setEditing(blankDevice())} disabled={locked} />
+    <Text style={styles.groupInstruction}>Pilih jenis standar untuk melihat nomor seri dan data sertifikatnya.</Text>
     {deviceGroups.map((group) => {
       const expanded = expandedName === group.key;
       return <Card key={group.key} style={styles.groupCard}>
@@ -78,7 +92,12 @@ export function DevicesScreen() {
               {selected ? <View style={styles.serialDetail}>
                 <View style={styles.detailLine}><Text style={styles.blockLabel}>MEREK</Text><Text style={styles.detailValue}>{device.brand}</Text></View>
                 <View style={styles.detailLine}><Text style={styles.blockLabel}>TIPE / MODEL</Text><Text style={styles.detailValue}>{device.model}</Text></View>
-                <View style={styles.detailLine}><Text style={styles.blockLabel}>JENIS ALAT</Text><Text style={styles.detailValue}>{device.isThermohygrometer ? 'Thermohygrometer' : 'Alat ukur lain'}</Text></View>
+                <View style={styles.detailLine}><Text style={styles.blockLabel}>JENIS STANDAR</Text><Text style={styles.detailValue}>{device.isThermohygrometer ? 'Thermohygrometer' : device.weighingStandard ? 'Anak timbangan' : 'Standar lain'}</Text></View>
+                {device.weighingStandard ? <View style={styles.certificateDetails}>
+                  <Text style={styles.certificateHeading}>DATA SERTIFIKAT MASSA</Text>
+                  <Text style={styles.certificateCaption}>NOMINAL {device.weighingStandard.nominalKg} kg · U95 {device.weighingStandard.uncertaintyU95G} g</Text>
+                  <View style={styles.pointChips}><Text style={styles.pointChip}>2025 · {device.weighingStandard.conventionalMass2025G} g</Text><Text style={styles.pointChip}>2026 · {device.weighingStandard.conventionalMass2026G} g</Text></View>
+                </View> : null}
                 {device.isThermohygrometer && device.certificate ? <View style={styles.certificateDetails}>
                   <Text style={styles.certificateHeading}>SERTIFIKAT ACUAN</Text>
                   <Text style={styles.certificateCaption}>TITIK SUHU · U95 {device.certificate.temperatureU95} °C</Text>
@@ -97,16 +116,24 @@ export function DevicesScreen() {
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.deviceModalHeader}>
-            <Text style={styles.deviceModalTitle}>{editing?.id ? 'Ubah alat ukur' : 'Alat ukur baru'}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Tutup form alat ukur" onPress={() => setEditing(null)}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable>
+            <Text style={styles.deviceModalTitle}>{editing?.id ? 'Ubah standar' : 'Standar baru'}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Tutup form standar" onPress={() => setEditing(null)}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable>
           </View>
           {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
             <Card>
-              <Field label="Nama alat ukur" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
+              <Field label="Nama jenis standar" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
+              <Text style={styles.groupInstruction}>Samakan nama ini dengan jenis standar yang diminta di Katalog kalibrasi, misalnya Thermohygrometer atau Tachometer.</Text>
               <Field label="Merek" value={editing.brand} onChange={(brand) => setEditing({ ...editing, brand })} />
               <Field label="Tipe / model" value={editing.model} onChange={(model) => setEditing({ ...editing, model })} />
               <Field label="Nomor seri" value={editing.serial} onChange={(serial) => setEditing({ ...editing, serial })} />
-              <Choice label="Jenis alat ukur" value={editing.isThermohygrometer} options={[{ value: false, label: 'Alat ukur lain' }, { value: true, label: 'Thermohygrometer' }]} onChange={(isThermohygrometer) => setEditing({ ...editing, isThermohygrometer, certificate: isThermohygrometer ? editing.certificate ?? blankCertificate() : editing.certificate })} />
+              <Choice label="Jenis standar" value={editing.isThermohygrometer ? 'thermohygrometer' : editing.weighingStandard ? 'weighing-standard' : 'other'} options={[
+                { value: 'other', label: 'Standar lain' }, { value: 'thermohygrometer', label: 'Thermohygrometer' }, { value: 'weighing-standard', label: 'Anak timbangan' },
+              ]} onChange={(kind) => setEditing((current) => current ? {
+                ...current,
+                isThermohygrometer: kind === 'thermohygrometer',
+                certificate: kind === 'thermohygrometer' ? current.certificate ?? blankCertificate() : current.certificate,
+                weighingStandard: kind === 'weighing-standard' ? current.weighingStandard ?? blankWeighingStandard() : null,
+              } : current)} />
               {editing.isThermohygrometer ? <>
                 <Heading title="Data sertifikat thermohygrometer" hint="Isi titik sesuai sertifikat alat. Data ini dipakai menghitung koreksi suhu dan kelembaban." />
                 <Field label="U95 suhu" value={editing.certificate?.temperatureU95} onChange={(temperatureU95) => updateCertificate((certificate) => ({ ...certificate, temperatureU95 }))} keyboard="decimal-pad" suffix="°C" />
@@ -124,7 +151,14 @@ export function DevicesScreen() {
                 </View>)}
                 <ActionButton title="＋ Tambah titik kelembaban" secondary onPress={() => updateCertificate((certificate) => ({ ...certificate, humidity: [...certificate.humidity, { value: '', correction: '' }] }))} />
               </> : null}
-              <View style={styles.actions}><ActionButton title="Simpan alat ukur" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
+              {editing.weighingStandard ? <>
+                <Heading title="Data sertifikat anak timbangan" hint="Nilai ini dipakai menghitung massa acuan, ketidakpastian sertifikat, dan drift pada pengujian timbangan." />
+                <Field label="Massa nominal" value={editing.weighingStandard.nominalKg} onChange={(nominalKg) => updateWeighingStandard((standard) => ({ ...standard, nominalKg }))} keyboard="decimal-pad" suffix="kg" />
+                <Field label="U95 sertifikat massa" value={editing.weighingStandard.uncertaintyU95G} onChange={(uncertaintyU95G) => updateWeighingStandard((standard) => ({ ...standard, uncertaintyU95G }))} keyboard="decimal-pad" suffix="g" />
+                <Field label="Massa konvensional 2025" value={editing.weighingStandard.conventionalMass2025G} onChange={(conventionalMass2025G) => updateWeighingStandard((standard) => ({ ...standard, conventionalMass2025G }))} keyboard="decimal-pad" suffix="g" />
+                <Field label="Massa konvensional 2026" value={editing.weighingStandard.conventionalMass2026G} onChange={(conventionalMass2026G) => updateWeighingStandard((standard) => ({ ...standard, conventionalMass2026G }))} keyboard="decimal-pad" suffix="g" />
+              </> : null}
+              <View style={styles.actions}><ActionButton title="Simpan standar" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
             </Card>
           </ScrollView> : null}
         </KeyboardAvoidingView>

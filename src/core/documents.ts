@@ -17,6 +17,30 @@ function performanceTable(result: CalculationResult) {
   return `<table><thead><tr><th>Pengujian</th><th>Setting</th><th>Rata-rata</th><th>Koreksi</th><th>U95</th><th>Toleransi</th><th>Hasil</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function weighingTable(result: CalculationResult) {
+  const weighing = result.weighing;
+  if (!weighing) return performanceTable(result);
+  const loadRows = weighing.points.map((point) => `<tr>
+    <td>${point.loadKg}</td><td>${escapeHtml(point.standardWeightSerials.join(' + '))}</td>
+    <td>${fixed(point.zeroReading, 4)}</td><td>${fixed(point.indication, 4)}</td>
+    <td>${fixed(point.referenceMassKg, 5)}</td><td>${fixed(point.correction, 5)}</td><td>${fixed(point.uncertaintyU95Kg, 5)}</td>
+  </tr>`).join('');
+  const repeatedRows = weighing.repeatabilityReadings.map((reading, index) => `<tr>
+    <td>${index + 1}</td><td>${fixed(reading.zeroReading, 4)}</td><td>${fixed(reading.indication, 4)}</td><td>${fixed(reading.difference, 4)}</td>
+  </tr>`).join('');
+  const lop = weighing.lop === null ? '—' : `${fixed(weighing.lop, 5)} kg / ${fixed(weighing.limit, 2)} kg`;
+  const outcome = weighing.pass === null ? 'BELUM LENGKAP' : weighing.pass ? 'LULUS' : 'TIDAK LULUS';
+  return `<h3>Uji berulang</h3><table><thead><tr><th>No.</th><th>Zero z (kg)</th><th>Penunjukan m (kg)</th><th>r = m − z (kg)</th></tr></thead><tbody>${repeatedRows}</tbody></table><table><tbody>
+    <tr><th>Rata-rata bacaan</th><td>${fixed(weighing.repeatabilityMean, 4)} kg</td></tr>
+    <tr><th>STDEV dari 10 bacaan</th><td>${fixed(weighing.repeatabilityStandardDeviation, 6)} kg</td></tr>
+    <tr><th>Nilai simpangan baku pada laporan Excel</th><td>${fixed(weighing.reportStandardDeviation, 6)} kg</td></tr>
+    <tr><th>Koreksi absolut maksimum</th><td>${fixed(weighing.maxAbsoluteCorrection, 5)} kg</td></tr>
+    <tr><th>U95 maksimum</th><td>${fixed(weighing.maxUncertaintyU95, 5)} kg</td></tr>
+    <tr><th>LOP / batas 10 × resolusi</th><td>${lop}</td></tr>
+    <tr><th>Hasil LOP</th><td>${outcome}</td></tr>
+  </tbody></table><h3>Pengujian beban</h3><table><thead><tr><th>Beban nominal (kg)</th><th>Anak timbangan</th><th>Bacaan nol (kg)</th><th>Bacaan berbeban (kg)</th><th>Massa konvensional (kg)</th><th>Koreksi (kg)</th><th>U95 (kg)</th></tr></thead><tbody>${loadRows}</tbody></table>`;
+}
+
 function environmentTable(result: CalculationResult) {
   const temp = result.environment.temperature;
   const humidity = result.environment.humidity;
@@ -34,8 +58,17 @@ function inspectionTable(result: CalculationResult) {
   return `<table><thead><tr><th>Bagian</th><th>Fisik</th><th>Fungsi</th><th>Keterangan</th></tr></thead><tbody>${result.inspections.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${escapeHtml(item.physical)}</td><td>${escapeHtml(item.function)}</td><td>${escapeHtml(item.note || '—')}</td></tr>`).join('')}</tbody></table>`;
 }
 
-function standardsTable(instrument: Instrument) {
-  return `<table><thead><tr><th>Peralatan standar</th><th>Merek</th><th>Tipe</th><th>Nomor seri</th></tr></thead><tbody>${instrument.standards.map(([name, brand, model, serial]) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(brand)}</td><td>${escapeHtml(model)}</td><td>${escapeHtml(serial)}</td></tr>`).join('')}</tbody></table>`;
+function standardsTable(record: CalibrationRecord, instrument: Instrument) {
+  const weights = record.data.weighing?.points.flatMap((point) => point.standardWeights) ?? [];
+  const uniqueWeights = [...new Map(weights.map((weight) => [weight.serial, weight])).values()];
+  const selectedStandards = record.data.selectedDevices === undefined
+    ? instrument.standards.map(([name, brand, model, serial]) => ({ name, brand, model, serial }))
+    : record.data.selectedDevices;
+  const rows = [
+    ...selectedStandards.map((device) => `<tr><td>${escapeHtml(device.name)}</td><td>${escapeHtml(device.brand)}</td><td>${escapeHtml(device.model)}</td><td>${escapeHtml(device.serial)}</td></tr>`),
+    ...uniqueWeights.map((weight) => `<tr><td>${escapeHtml(`${weight.name} ${weight.nominalKg} kg`)}</td><td>${escapeHtml(weight.brand)}</td><td>${escapeHtml(weight.model)}</td><td>${escapeHtml(weight.serial)}</td></tr>`),
+  ].join('');
+  return `<table><thead><tr><th>Standar kalibrasi</th><th>Merek</th><th>Tipe</th><th>Nomor seri</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function safetyTable(result: CalculationResult) {
@@ -62,9 +95,9 @@ export function buildDocumentHtml(record: CalibrationRecord, instrument: Instrum
     row('Ruang pelaksanaan', identity.room), row('Tanggal penerimaan', identity.receivedDate), row('Tanggal pelaksanaan', identity.testDate), row('Tanggal terbit', identity.issueDate),
   ].join('');
   const resultBlock = `<h2>Pengukuran kondisi lingkungan</h2>${environmentTable(result)}
-    <h2>Standar dan peralatan yang digunakan</h2>${standardsTable(instrument)}
+    <h2>Standar kalibrasi yang digunakan</h2>${standardsTable(record, instrument)}
     <h2>Pemeriksaan fisik dan fungsi</h2>${inspectionTable(result)}${safetyTable(result)}
-    <h2>Pengujian kinerja</h2>${performanceTable(result)}
+    <h2>Pengujian kinerja</h2>${result.weighing ? weighingTable(result) : performanceTable(result)}
     <div class="outcome"><strong>Jumlah skor</strong><span>${result.score}/100</span><b>${escapeHtml(result.status)}</b></div>`;
   const certificateFields = certificate
     ? `<div class="certificate"><p>Dengan ini dinyatakan hasil pengujian/kalibrasi untuk alat di atas adalah:</p>

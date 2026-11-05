@@ -25,25 +25,25 @@ export function HealthEquipmentScreen() {
   const edit = (entry: EquipmentMethod) => { setIsNew(false); setEditing({ ...entry }); };
   const closeEditor = () => setEditing(null);
   const save = () => {
-    if (!editing?.instrumentId) { Alert.alert('Jenis alat wajib dipilih', 'Pilih jenis alat yang akan disiapkan untuk teknisi.'); return; }
-    if (!editing.method.trim()) { Alert.alert('Metode kerja wajib diisi', 'Masukkan metode kerja sebelum menyimpan jenis alat.'); return; }
-    if (isNew && data.equipmentMethods.some((entry) => entry.instrumentId === editing.instrumentId)) { Alert.alert('Jenis alat sudah terdaftar', 'Ubah metode kerja dari daftar alat yang sudah ada.'); return; }
+    if (!editing?.instrumentId) { Alert.alert('Jenis kalibrasi wajib dipilih', 'Pilih jenis alat yang akan disiapkan untuk teknisi.'); return; }
+    if (!editing.method.trim()) { Alert.alert('Metode kerja wajib diisi', 'Masukkan metode kerja sebelum menyimpan katalog.'); return; }
+    if (isNew && data.equipmentMethods.some((entry) => entry.instrumentId === editing.instrumentId)) { Alert.alert('Jenis kalibrasi sudah terdaftar', 'Ubah metode kerja dari katalog yang sudah ada.'); return; }
     const instrument = getInstrument(editing.instrumentId);
     if (!instrument) { Alert.alert('Jenis alat tidak dikenal', 'Pilih salah satu jenis alat yang didukung.'); return; }
     const entry = { instrumentId: editing.instrumentId, method: editing.method.trim() };
-    setConfirmation({ title: isNew ? 'Tambahkan jenis alat?' : 'Simpan metode kerja?', message: `Metode kerja ${instrument.name} akan digunakan untuk pengerjaan baru oleh teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveEquipmentMethod(entry); closeEditor(); } });
+    setConfirmation({ title: isNew ? 'Tambahkan ke katalog?' : 'Simpan metode kerja?', message: `Metode ${instrument.name} akan digunakan untuk kalibrasi baru oleh teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveEquipmentMethod(entry); closeEditor(); } });
   };
   const remove = (entry: EquipmentMethod) => {
     const instrument = getInstrument(entry.instrumentId);
-    setConfirmation({ title: 'Hapus jenis alat?', message: `${instrument?.name ?? 'Jenis alat'} tidak akan muncul lagi untuk pengerjaan baru teknisi. Catatan yang sudah dibuat tetap tersimpan.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => data.deleteEquipmentMethod(entry.instrumentId) });
+    setConfirmation({ title: 'Hapus dari katalog?', message: `${instrument?.name ?? 'Jenis kalibrasi'} tidak tersedia untuk pekerjaan baru. Catatan yang sudah dibuat tetap tersimpan.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => data.deleteEquipmentMethod(entry.instrumentId) });
   };
 
-  return <ScreenPage title="Data alat kesehatan" hint="Admin menyiapkan jenis alat dan metode wajibnya. Metode akan otomatis masuk ke form teknisi.">
+  return <ScreenPage title="Katalog kalibrasi" hint="Siapkan jenis alat yang diuji dan metode kerja yang otomatis masuk ke form teknisi.">
     <StorageMessage message={data.storageError} />
-    <Card><Heading title="Jenis alat yang didukung" hint={`Rumus tersedia untuk ${instruments.map((instrument) => instrument.name).join(', ')}. Jenis alat baru perlu rumus kalibrasi sebelum dapat ditambahkan.`} /></Card>
-    <ActionButton title="＋ Tambah jenis alat" onPress={add} disabled={locked || !available.length} />
-    {!data.loaded ? <Card><Text style={styles.muted}>Memuat data jenis alat…</Text></Card> : null}
-    {data.loaded && !configured.length ? <Card style={styles.emptyState}><Text style={styles.emptyTitle}>Belum ada jenis alat untuk teknisi</Text><Text style={styles.muted}>Tambahkan jenis alat lalu isi metode kerja agar teknisi bisa mulai membuat pengerjaan.</Text></Card> : null}
+    <Card><Heading title="Template yang tersedia" hint={`Perhitungan mengikuti template ${instruments.map((instrument) => instrument.name).join(', ')}. Standar yang dibutuhkan ditampilkan untuk setiap metode.`} /></Card>
+    <ActionButton title="＋ Tambah ke katalog" onPress={add} disabled={locked || !available.length} />
+    {!data.loaded ? <Card><Text style={styles.muted}>Memuat katalog kalibrasi…</Text></Card> : null}
+    {data.loaded && !configured.length ? <Card style={styles.emptyState}><Text style={styles.emptyTitle}>Katalog belum disiapkan</Text><Text style={styles.muted}>Tambahkan jenis kalibrasi dan isi metode kerja agar teknisi dapat memulai pekerjaan.</Text></Card> : null}
     {configured.map(({ instrument, entry }) => <Card key={entry.instrumentId} style={styles.entityCard}>
       <View style={styles.entityHeader}>
         <View style={[styles.entityAvatar, styles.deviceAvatar]}><Text style={styles.entityAvatarText}>AK</Text></View>
@@ -51,17 +51,22 @@ export function HealthEquipmentScreen() {
         <Badge text="SIAP" tone="good" />
       </View>
       <View style={styles.equipmentMethodPreview}><Text style={styles.equipmentMethodLabel}>METODE KERJA</Text><Text style={styles.equipmentMethodText}>{entry.method}</Text></View>
+      <View style={styles.equipmentMethodPreview}><Text style={styles.equipmentMethodLabel}>STANDAR YANG DIBUTUHKAN</Text>
+        {instrument.standards.map(([name]) => <ValueLine key={name} label={name} value="Pilih nomor seri saat pengerjaan" />)}
+        {instrument.weighingScale ? <ValueLine label="Anak timbangan" value="Pilih per titik beban saat pengerjaan" /> : null}
+      </View>
       <View style={styles.actions}><ActionButton title="Ubah metode" secondary onPress={() => edit(entry)} disabled={locked} /><ActionButton title="Hapus" danger onPress={() => remove(entry)} disabled={locked} /></View>
     </Card>)}
     <Modal visible={Boolean(editing) && !confirmation} animationType="slide" presentationStyle="fullScreen" onRequestClose={closeEditor}>
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.deviceModalHeader}><Text style={styles.deviceModalTitle}>{isNew ? 'Jenis alat baru' : 'Ubah metode kerja'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Tutup form jenis alat" onPress={closeEditor}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable></View>
+          <View style={styles.deviceModalHeader}><Text style={styles.deviceModalTitle}>{isNew ? 'Jenis kalibrasi baru' : 'Ubah metode kerja'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Tutup form katalog kalibrasi" onPress={closeEditor}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable></View>
           {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled"><Card>
-            <Heading title="Informasi jenis alat" hint="Metode wajib diisi admin sebelum jenis alat tersedia di form teknisi." />
-            {isNew ? <Choice label="Jenis alat kesehatan *" value={editing.instrumentId} options={available.map((instrument) => ({ value: instrument.id, label: instrument.name }))} onChange={(instrumentId) => setEditing((current) => current ? { ...current, instrumentId } : current)} /> : <ValueLine label="Jenis alat kesehatan" value={getInstrument(editing.instrumentId)?.name} />}
+            <Heading title="Informasi katalog" hint="Pilih template perhitungan yang sesuai, lalu simpan metode kerja yang dipakai teknisi." />
+            {isNew ? <Choice label="Jenis alat yang diuji *" value={editing.instrumentId} options={available.map((instrument) => ({ value: instrument.id, label: instrument.name }))} onChange={(instrumentId) => setEditing((current) => current ? { ...current, instrumentId } : current)} /> : <ValueLine label="Jenis alat yang diuji" value={getInstrument(editing.instrumentId)?.name} />}
+            {isNew && editing.instrumentId ? <View style={styles.equipmentMethodPreview}><Text style={styles.equipmentMethodLabel}>STANDAR YANG AKAN DIMINTA</Text>{getInstrument(editing.instrumentId)?.standards.map(([name]) => <ValueLine key={name} label={name} value="Nomor seri dipilih teknisi" />)}{getInstrument(editing.instrumentId)?.weighingScale ? <ValueLine label="Anak timbangan" value="Dipilih teknisi untuk tiap beban" /> : null}</View> : null}
             <Field label="Metode kerja *" value={editing.method} onChange={(method) => setEditing((current) => current ? { ...current, method } : current)} multiline />
-            <Text style={styles.equipmentMethodHint}>Metode ini otomatis disalin ke pekerjaan baru teknisi untuk jenis alat yang dipilih.</Text>
+            <Text style={styles.equipmentMethodHint}>Metode ini otomatis disalin ke pekerjaan baru teknisi. Template perhitungan dan standar yang diminta mengikuti jenis alat yang dipilih.</Text>
             <View style={styles.actions}><ActionButton title="Simpan metode kerja" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={closeEditor} /></View>
           </Card></ScrollView> : null}
         </KeyboardAvoidingView>
