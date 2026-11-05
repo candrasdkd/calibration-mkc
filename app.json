@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "mobile-calibration",
+    "name": "Kalibrasi Mobile",
     "slug": "mobile-calibration",
+    "scheme": "kalibrasimobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,7 +19,18 @@
       }
     },
     "web": {
+      "output": "static",
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sharing",
+      [
+        "expo-router",
+        {
+          "apiRoutes": true
+        }
+      ],
+      "expo-status-bar"
+    ]
   }
 }
