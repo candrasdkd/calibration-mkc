@@ -26,7 +26,6 @@ import type {
   SphygmomanometerData,
   InfusionPumpData,
   SuctionPumpData,
-  SphygmomanometerDirectionResult,
   Thermohygrometer,
   WeighingStandardWeight,
 } from '../../../core/types';
@@ -432,30 +431,37 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
   </>;
 }
 
-function PressureDirectionInput({ setting, label, values, result, onChange }: {
-  setting: number;
-  label: string;
-  values: string[];
-  result: SphygmomanometerDirectionResult;
-  onChange: (index: number, value: string) => void;
+function PressureDirectionTable({ title, direction, data, results, onReading }: {
+  title: string;
+  direction: 'up' | 'down';
+  data: SphygmomanometerData['pressureReadings'];
+  results: NonNullable<CalculationResult['sphygmomanometer']>['pressureReadings'];
+  onReading: (setting: number, direction: 'up' | 'down', index: number, value: string) => void;
 }) {
-  return <View style={styles.performanceCard}>
-    <View style={styles.performanceHeading}>
-      <Text style={styles.labelLike}>Tekanan {label}</Text>
-      <Badge text={result.pass === null ? 'MENUNGGU' : result.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.pass === null ? 'wait' : result.pass ? 'good' : 'bad'} />
+  const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
+  return <View>
+    <Text style={styles.pressureDirectionTitle}>{title}</Text>
+    <View style={styles.pressureTable}>
+      <View style={[styles.pressureTableRow, styles.pressureTableHeader]}>
+        <Text style={styles.pressureSettingColumn}>Setting</Text>
+        {[1, 2, 3].map((number) => <Text key={number} style={styles.pressureReadingColumn}>Bacaan {number}</Text>)}
+      </View>
+      {data.map((point) => {
+        const calculated = results.find((item) => item.setting === point.setting)?.[direction];
+        return <View key={point.setting}>
+          <View style={styles.pressureTableRow}>
+            <Text style={styles.pressureSettingColumn}>{point.setting} mmHg</Text>
+            {point[direction].map((value, index) => <View key={index} style={styles.pressureInputCell}>
+              <TextInput accessibilityLabel={`${point.setting} mmHg, ${title}, bacaan DPM ${index + 1}`} value={value} onChangeText={(next) => onReading(point.setting, direction, index, next)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.pressureInput} />
+            </View>)}
+          </View>
+          {calculated ? <View style={styles.pressureStats}>
+            <View style={styles.resultLine}><Text style={styles.pressureStatsText}>x̄ terkoreksi {fmt(calculated.mean)} · C {fmt(calculated.correction)} · U95 {fmt(calculated.uncertaintyU95)}</Text>{outcome(calculated.pass)}</View>
+            <Text style={styles.pressureStatsText}>|C| + U95 {fmt(calculated.decisionValue)} / 4 mmHg</Text>
+          </View> : null}
+        </View>;
+      })}
     </View>
-    <View style={styles.readingsGrid}>
-      {values.map((value, index) => <View key={index} style={styles.readingCell}>
-        <Text style={styles.readingLabel}>Bacaan DPM {index + 1}</Text>
-        <TextInput accessibilityLabel={`${setting} mmHg, ${label}, bacaan DPM ${index + 1}`} value={value} onChangeText={(next) => onChange(index, next)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
-      </View>)}
-    </View>
-    {result.mean !== null ? <View style={styles.inlineStats}>
-      <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(result.mean)} mmHg</Text>
-      <Text style={styles.inlineStat}>Koreksi C {fmt(result.correction)} mmHg</Text>
-      <Text style={styles.inlineStat}>U95 {fmt(result.uncertaintyU95)} mmHg</Text>
-      <Text style={styles.inlineStat}>|C| + U95 {fmt(result.decisionValue)} / 4 mmHg</Text>
-    </View> : null}
   </View>;
 }
 
@@ -484,15 +490,9 @@ function SphygmomanometerStep({ data, result, onChange }: {
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.rapidDeflationSeconds.pass)}</View>
     </Card>
     <Card>
-      <Heading title="Uji ketepatan tekanan" hint="Pada setiap setting, catat tiga bacaan Digital Pressure Meter saat tekanan naik dan turun. Koreksi standar dihitung otomatis." />
-      {data.pressureReadings.map((point, index) => {
-        const calculated = result.pressureReadings[index];
-        return <View key={point.setting} style={styles.performanceCard}>
-          <View style={styles.performanceHeading}><Text style={styles.itemTitle}>Setting {point.setting} mmHg</Text></View>
-          <PressureDirectionInput setting={point.setting} label="naik" values={point.up} result={calculated.up} onChange={(readingIndex, value) => updateReading(point.setting, 'up', readingIndex, value)} />
-          <PressureDirectionInput setting={point.setting} label="turun" values={point.down} result={calculated.down} onChange={(readingIndex, value) => updateReading(point.setting, 'down', readingIndex, value)} />
-        </View>;
-      })}
+      <Heading title="Uji ketepatan tekanan" hint="Isi tabel tekanan naik sampai selesai, lalu lanjutkan ke tabel tekanan turun. Setiap setting memakai tiga bacaan Digital Pressure Meter." />
+      <PressureDirectionTable title="1. Tekanan naik" direction="up" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
+      <PressureDirectionTable title="2. Tekanan turun" direction="down" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
     </Card>
   </>;
 }
@@ -605,6 +605,43 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
   </>;
 }
 
+function PressureResultTable({ title, direction, pressureReadings }: {
+  title: string;
+  direction: 'up' | 'down';
+  pressureReadings: NonNullable<CalculationResult['sphygmomanometer']>['pressureReadings'];
+}) {
+  return <>
+    <Text style={styles.pressureDirectionTitle}>{title}</Text>
+    <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}>
+      <View style={styles.pressureResultTable}>
+        <View style={[styles.pressureResultRow, styles.pressureResultHeader]}>
+          <Text style={[styles.pressureResultCell, styles.pressureResultSetting]}>Setting</Text>
+          {[1, 2, 3].map((number) => <Text key={number} style={[styles.pressureResultCell, styles.pressureResultReading]}>DPM {number}</Text>)}
+          <Text style={[styles.pressureResultCell, styles.pressureResultMean]}>Rata-rata terkoreksi</Text>
+          <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>Koreksi C</Text>
+          <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>U95</Text>
+          <Text style={[styles.pressureResultCell, styles.pressureResultDecision]}>|C| + U95</Text>
+          <Text style={[styles.pressureResultCell, styles.pressureResultOutcome]}>Hasil</Text>
+        </View>
+        {pressureReadings.map((point) => {
+          const item = point[direction];
+          return <View key={point.setting} style={styles.pressureResultRow}>
+            <Text style={[styles.pressureResultCell, styles.pressureResultSetting]}>{point.setting} mmHg</Text>
+            {item.readings.map((reading, index) => <Text key={index} style={[styles.pressureResultCell, styles.pressureResultReading]}>{fmt(reading)}</Text>)}
+            <Text style={[styles.pressureResultCell, styles.pressureResultMean]}>{fmt(item.mean)}</Text>
+            <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>{fmt(item.correction)}</Text>
+            <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>{fmt(item.uncertaintyU95)}</Text>
+            <Text style={[styles.pressureResultCell, styles.pressureResultDecision]}>{fmt(item.decisionValue)}</Text>
+            <View style={[styles.pressureResultCell, styles.pressureResultOutcome]}>
+              <Badge text={item.pass === null ? 'MENUNGGU' : item.pass ? 'LULUS' : 'TIDAK LULUS'} tone={item.pass === null ? 'wait' : item.pass ? 'good' : 'bad'} />
+            </View>
+          </View>;
+        })}
+      </View>
+    </ScrollView>
+  </>;
+}
+
 function ResultStep({ data, result, instrument }: { data: CalibrationData; result: CalculationResult; instrument: Instrument }) {
   const tone = result.complete ? result.score !== null && result.score >= 70 ? 'good' : 'bad' : 'wait';
   return <>
@@ -638,18 +675,8 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
     {result.sphygmomanometer ? <Card><Heading title="Hasil sphygmomanometer" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Uji kebocoran · {fmt(result.sphygmomanometer.leakageDrop.value)} mmHg / batas 15 mmHg</Text>{result.sphygmomanometer.leakageDrop.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.leakageDrop.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.leakageDrop.pass ? 'good' : 'bad'} />}</View>
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Deflasi cepat · {fmt(result.sphygmomanometer.rapidDeflationSeconds.value)} detik / batas 10 detik</Text>{result.sphygmomanometer.rapidDeflationSeconds.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'good' : 'bad'} />}</View>
-      {result.sphygmomanometer.pressureReadings.map((point) => (['up', 'down'] as const).map((direction) => {
-        const item = point[direction];
-        const rawReadings = item.readings.map((value) => fmt(value)).join(' · ');
-        return <View key={`${point.setting}-${direction}`} style={styles.resultPerformance}>
-          <View style={styles.resultLine}><Text style={styles.resultLabel}>{point.setting} mmHg · {direction === 'up' ? 'Naik' : 'Turun'}</Text><Badge text={item.pass === null ? 'MENUNGGU' : item.pass ? 'LULUS' : 'TIDAK LULUS'} tone={item.pass === null ? 'wait' : item.pass ? 'good' : 'bad'} /></View>
-          <ValueLine label="Bacaan DPM" value={`${rawReadings} mmHg`} />
-          <ValueLine label="Rata-rata terkoreksi" value={item.mean === null ? '—' : `${fmt(item.mean)} mmHg`} />
-          <ValueLine label="Koreksi C" value={item.correction === null ? '—' : `${fmt(item.correction)} mmHg`} />
-          <ValueLine label="U95" value={item.uncertaintyU95 === null ? '—' : `${fmt(item.uncertaintyU95)} mmHg`} />
-          <ValueLine label="|C| + U95 / batas" value={item.decisionValue === null ? '—' : `${fmt(item.decisionValue)} / 4 mmHg`} />
-        </View>;
-      }))}
+      <PressureResultTable title="1. Tekanan naik" direction="up" pressureReadings={result.sphygmomanometer.pressureReadings} />
+      <PressureResultTable title="2. Tekanan turun" direction="down" pressureReadings={result.sphygmomanometer.pressureReadings} />
     </Card> : result.suctionPump ? <Card><Heading title="Hasil pengujian suction pump" />
       {result.suctionPump.pressureReadings.map((point) => (['up', 'down'] as const).map((direction) => {
         const item = point[direction];
