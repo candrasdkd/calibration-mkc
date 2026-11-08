@@ -35,6 +35,7 @@ const demoDirectory: AdminDirectory = {
     ...thermohygrometers.slice(1).map((reference, index): MeasuringDevice => ({ id: `demo-device-thermo-${index + 2}`, name: 'Thermohygrometer', brand: 'Elitech', model: 'GSP-6', serial: reference.serial, isThermohygrometer: true, certificate: certificateFrom(reference), isDemo: true })),
     { id: 'demo-device-5', name: 'Vital Sign Simulator', brand: 'Gossen Metrawatt', model: 'Seculife BP Pro', serial: '735AE9911141', isThermohygrometer: false, certificate: null, isDemo: true },
     { id: 'demo-device-6', name: 'Gas Flow Analyzer', brand: 'IMT Medical', model: 'PF-300', serial: '2012BA104380', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-ida', name: 'Infusion Device Analyzer', brand: 'Gossen Metrawatt', model: 'Seculife IF Pro', serial: '73199911066', isThermohygrometer: false, certificate: null, isDemo: true },
     ...adultScaleStandardWeights.map((weight, index): MeasuringDevice => ({
       id: `demo-scale-weight-${index + 1}`, name: weight.name, brand: weight.brand, model: weight.model, serial: weight.serial,
       isThermohygrometer: false, certificate: null, weighingStandard: {
@@ -48,7 +49,7 @@ const demoDirectory: AdminDirectory = {
     { id: 'demo-technician-2', name: 'Rafi Teknisi Demo', phone: '0812-0000-0012', isDemo: true },
   ],
   equipmentMethods: [],
-  seedVersion: 5,
+  seedVersion: 6,
 };
 
 export type AdminDataContextValue = AdminDirectory & {
@@ -110,6 +111,11 @@ function parseDirectory(value: unknown): AdminDirectory {
       if (!devices.some((item) => item.id === demoDevice.id || item.serial === demoDevice.serial)) devices.push(demoDevice);
     }
   }
+  if (!directory.seedVersion || directory.seedVersion < 6) {
+    for (const demoDevice of demoDirectory.devices.filter((item) => item.id === 'demo-device-ida')) {
+      if (!devices.some((item) => item.id === demoDevice.id || item.serial === demoDevice.serial)) devices.push(demoDevice);
+    }
+  }
   return {
     customers: directory.customers,
     devices,
@@ -117,7 +123,7 @@ function parseDirectory(value: unknown): AdminDirectory {
     equipmentMethods: Array.isArray(directory.equipmentMethods)
       ? directory.equipmentMethods.filter((entry): entry is EquipmentMethod => Boolean(entry && typeof entry.instrumentId === 'string' && typeof entry.method === 'string' && instruments.some((instrument) => instrument.id === entry.instrumentId)))
       : [],
-    seedVersion: 5,
+    seedVersion: 6,
   };
 }
 

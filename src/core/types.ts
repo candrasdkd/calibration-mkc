@@ -1,4 +1,4 @@
-export type PerformanceFormula = 'centrifugeSpeed' | 'centrifugeTime' | 'fetalHeartRate' | 'flowmeter';
+export type PerformanceFormula = 'centrifugeSpeed' | 'centrifugeTime' | 'fetalHeartRate' | 'flowmeter' | 'infusionFlow';
 export type InspectionChoice = '' | 'Baik' | 'Tidak baik';
 export type DocumentKind = 'report' | 'certificate';
 
@@ -80,6 +80,23 @@ export interface SphygmomanometerData {
   pressureReadings: SphygmomanometerPressureInput[];
 }
 
+export interface InfusionPumpData {
+  channel: string;
+  occlusionReadings: string[];
+}
+
+export interface SuctionPumpPressureInput {
+  setting: number;
+  up: string[];
+  down: string[];
+}
+
+export interface SuctionPumpData {
+  pressureReadings: SuctionPumpPressureInput[];
+  maximumVacuumReading: string;
+  maximumVacuumSeconds: string;
+}
+
 export interface PerformanceSetting {
   id: string;
   label: string;
@@ -103,11 +120,13 @@ export interface Instrument {
   score: InstrumentScore;
   weighingScale?: WeighingScaleConfig;
   sphygmomanometer?: SphygmomanometerConfig;
+  suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number };
 }
 
 export interface IdentityData {
   customerId: string;
   documentNumber: string;
+  orderNumber: string;
   labelNumber: string;
   brand: string;
   model: string;
@@ -167,11 +186,15 @@ export interface SafetyData {
   voltage: string;
   earthType: string;
   earthResistance: string;
+  earthMeets?: '' | 'Ya' | 'Tidak';
   leakageType: string;
   equipmentLeakage: string;
+  equipmentLeakageMeets?: '' | 'Ya' | 'Tidak';
   appliedLeakage: string;
+  appliedLeakageMeets?: '' | 'Ya' | 'Tidak';
   appliedLeakageNA: boolean;
   insulationResistance: string;
+  insulationMeets?: '' | 'Ya' | 'Tidak';
 }
 
 export interface CalibrationData {
@@ -183,6 +206,8 @@ export interface CalibrationData {
   performance: PerformanceEntry[];
   weighing?: WeighingData;
   sphygmomanometer?: SphygmomanometerData;
+  infusionPump?: InfusionPumpData;
+  suctionPump?: SuctionPumpData;
   safety: SafetyData;
 }
 
@@ -232,6 +257,43 @@ export interface CalculatedPerformance {
   testValue: number;
   pass: boolean;
   readings: number[];
+  correctedMean?: number;
+  error?: number;
+}
+
+export interface PumpOcclusionResult {
+  mean: number;
+  correction: number;
+  correctedMean: number;
+  uncertaintyU95: number;
+  limit: number;
+  pass: boolean;
+  readings: number[];
+}
+
+export interface SuctionDirectionResult {
+  readings: number[];
+  mean: number;
+  correction: number;
+  correctedMean: number;
+  error: number;
+  uncertaintyU95: number;
+  pass: boolean;
+}
+
+export interface SuctionPressureResult {
+  setting: number;
+  up: SuctionDirectionResult | null;
+  down: SuctionDirectionResult | null;
+}
+
+export interface SuctionPumpResult {
+  pressureReadings: SuctionPressureResult[];
+  maximumVacuumReading: number | null;
+  maximumVacuumReadingPass: boolean | null;
+  maximumVacuumSeconds: number | null;
+  maximumVacuumPass: boolean | null;
+  complete: boolean;
 }
 
 export interface PerformanceResultRow extends PerformanceEntry {
@@ -324,6 +386,8 @@ export interface CalculationResult {
   performanceScore: number | null;
   weighing: WeighingResult | null;
   sphygmomanometer: SphygmomanometerResult | null;
+  pumpOcclusion: PumpOcclusionResult | null;
+  suctionPump: SuctionPumpResult | null;
   safety: SafetyResult | null;
   safetyScore: number | null;
   score: number | null;

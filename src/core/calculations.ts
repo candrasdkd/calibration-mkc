@@ -6,11 +6,14 @@ import type {
   EnvironmentMeasurement,
   EnvironmentResult,
   Instrument,
+  InfusionPumpData,
   MeasurementReferences,
   PerformanceEntry,
   SafetyCheck,
   SafetyData,
   SafetyResult,
+  SuctionPumpData,
+  SuctionPumpResult,
   SphygmomanometerConfig,
   SphygmomanometerData,
   SphygmomanometerDirectionResult,
@@ -295,6 +298,120 @@ function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementR
   };
 }
 
+const pumpFlowChannels = {
+  'Channel 1': {
+    flow: [-0.0044382463855594, -0.6893402184501818], occlusion: [0.0007131474999683357, -0.32276291846077326],
+    drift: [[5, 0.32], [10, 0.21], [50, 1.11], [100, 1.1], [300, 7.83]],
+  },
+  'Channel 2': {
+    flow: [-0.008489446490550527, -0.9974586654622964], occlusion: [0.0007349966213253538, -0.19390370130089055],
+    drift: [[5, 0.09], [10, 0.3], [50, 0.64], [100, 3.63], [300, 1.72]],
+  },
+  'Channel 3': {
+    flow: [-0.021639410741783483, 0.031476368066201355], occlusion: [0.000803253772109678, -0.02413768438734311],
+    drift: [[5, 0.32], [10, 0.02], [50, 0.77], [100, 0.35], [300, 7.83]],
+  },
+} as const;
+const pumpFlowCertificateU95 = [[10, 0.11], [25, 0.25625], [50, 0.5], [75, 0.75], [100, 1], [150, 1.55], [300, 3.2]] as const;
+
+function interpolateTable(value: number, table: readonly (readonly [number, number])[]): number | null {
+  if (value < table[0][0] || value > table[table.length - 1][0]) return null;
+  for (let index = 1; index < table.length; index += 1) {
+    const upper = table[index];
+    const lower = table[index - 1];
+    if (value <= upper[0]) return lower[1] + ((value - lower[0]) / (upper[0] - lower[0])) * (upper[1] - lower[1]);
+  }
+  return table[table.length - 1][1];
+}
+
+function expandedUncertainty(components: number[], reliabilities: number[]): number {
+  const variance = components.reduce((sum, component) => sum + component ** 2, 0);
+  const denominator = components.reduce((sum, component, index) => sum + component ** 4 / reliabilities[index], 0);
+  const effectiveDof = denominator ? variance ** 2 / denominator : Number.POSITIVE_INFINITY;
+  return Math.sqrt(variance) * studentTCritical95(effectiveDof);
+}
+
+function calculatePumpFlow(row: PerformanceEntry, channel: string): CalculatedPerformance | null {
+  const setting = number(row.setting);
+  const readings = row.readings.map(number);
+  const profile = pumpFlowChannels[channel as keyof typeof pumpFlowChannels];
+  if (!profile || setting === null || setting <= 0 || readings.length !== 6 || readings.some((reading) => reading === null)) return null;
+  const values = readings as number[];
+  const mean = average(values);
+  const drift = interpolateTable(setting, profile.drift);
+  const certificateU95 = interpolateTable(setting, pumpFlowCertificateU95);
+  if (drift === null || certificateU95 === null) return null;
+  const correction = profile.flow[1] + profile.flow[0] * mean;
+  const correctedMean = mean + correction;
+  const error = correctedMean - setting;
+  const standardDeviation = sampleStandardDeviation(values);
+  const ua = standardDeviation / Math.sqrt(3);
+  const u95 = expandedUncertainty([
+    0.01 / Math.sqrt(3), ua, drift / Math.sqrt(3), certificateU95 / 2,
+  ], [50, 2, 50, 50]);
+  const tolerance = 0.1;
+  const testValue = Math.abs(error / setting);
+  return { setting, mean, correction, correctedMean, error, ua, u95, tolerance, testValue, pass: testValue <= tolerance, readings: values };
+}
+
+function calculatePumpOcclusion(input: InfusionPumpData | undefined): CalculationResult['pumpOcclusion'] {
+  if (!input || input.occlusionReadings.length !== 6) return null;
+  const profile = pumpFlowChannels[input.channel as keyof typeof pumpFlowChannels];
+  const readings = input.occlusionReadings.map(number);
+  if (!profile || readings.some((reading) => reading === null)) return null;
+  const values = readings as number[];
+  const mean = average(values);
+  const correction = profile.occlusion[1] + profile.occlusion[0] * mean;
+  const correctedMean = mean + correction;
+  const uncertaintyU95 = expandedUncertainty([
+    0.01 / Math.sqrt(3), sampleStandardDeviation(values) / Math.sqrt(3), 0.012 / 2,
+  ], [50, 2, 50]);
+  return { mean, correction, correctedMean, uncertaintyU95, limit: 20, pass: mean <= 20, readings: values };
+}
+
+const suctionDrift = {
+  up: [[0, 0.02], [100, 0.82], [200, 0.12], [300, 0.42], [400, 0.12], [500, 0.22], [600, 0.72]],
+  down: [[0, 0.02], [100, 0.52], [200, 0.08], [300, 0.32], [400, 0.12], [500, 0.42], [600, 0.72]],
+} as const;
+
+function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, data: SuctionPumpData | undefined, standardValid: boolean): SuctionPumpResult {
+  const pressureReadings = config.pressurePoints.map((setting) => {
+    const input = data?.pressureReadings.find((point) => point.setting === setting);
+    const calculateDirection = (direction: 'up' | 'down') => {
+      const readings = (input?.[direction] ?? []).map(number);
+      if (!standardValid || readings.length !== 3 || readings.some((value) => value === null)) return null;
+      const values = readings as number[];
+      const mean = average(values);
+      const signedMean = -mean;
+      const drift = interpolateTable(Math.abs(setting), suctionDrift[direction]);
+      if (drift === null) return null;
+      const slope = direction === 'up' ? 0.003441823675411558 : 0.003504637540282135;
+      const intercept = direction === 'up' ? 0.2940836678821175 : 0.3211573395802835;
+      const correction = intercept + slope * signedMean;
+      const correctedMean = signedMean + correction;
+      const error = correctedMean - setting;
+      const ua = sampleStandardDeviation(values) / Math.sqrt(3);
+      const uncertaintyU95 = expandedUncertainty([
+        (20 * 0.5 / 3) / Math.sqrt(6), ua, drift / Math.sqrt(3), 0.31 / 2,
+      ], [50, 2, 50, 50]);
+      return { readings: values, mean, correction, correctedMean, error, uncertaintyU95, pass: Math.abs(error / setting) <= 0.1 };
+    };
+    return { setting, up: calculateDirection('up'), down: calculateDirection('down') };
+  });
+  const maximumVacuumReading = number(data?.maximumVacuumReading);
+  const maximumVacuumSeconds = number(data?.maximumVacuumSeconds);
+  const complete = standardValid && maximumVacuumReading !== null && maximumVacuumSeconds !== null
+    && pressureReadings.every((point) => point.up !== null && point.down !== null);
+  return {
+    pressureReadings,
+    maximumVacuumReading,
+    maximumVacuumReadingPass: maximumVacuumReading === null ? null : Math.abs(maximumVacuumReading) >= config.minimumVacuumMmHg,
+    maximumVacuumSeconds,
+    maximumVacuumPass: maximumVacuumSeconds === null ? null : maximumVacuumSeconds <= 10,
+    complete,
+  };
+}
+
 const earthLimits = [0.3, 0.2, 0.3, 0.5];
 const leakageLimits = [1000, 500, 500, 100];
 
@@ -334,13 +451,23 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const dpmSerial = instrument.standards.find(([name]) => name.toLowerCase() === 'digital pressure meter')?.[3];
   const selectedDpm = data.selectedDevices?.find((device) => device.name.toLowerCase() === 'digital pressure meter');
   const dpmStandardValid = data.selectedDevices === undefined || selectedDpm?.serial === dpmSerial;
+  const pumpAnalyzerSerial = instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3];
+  const selectedPumpAnalyzer = data.selectedDevices?.find((device) => device.name === 'Infusion Device Analyzer');
+  const pumpAnalyzerValid = data.selectedDevices === undefined || selectedPumpAnalyzer?.serial === pumpAnalyzerSerial;
   const sphygmomanometer = instrument.sphygmomanometer
     ? calculateSphygmomanometer(instrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid)
     : null;
   const performance = data.performance.map((row) => ({
     ...row,
-    result: calculatePerformanceRow(row, data.references),
+    result: row.formula === 'infusionFlow'
+      ? pumpAnalyzerValid ? calculatePumpFlow(row, data.infusionPump?.channel ?? '') : null
+      : calculatePerformanceRow(row, data.references),
   }));
+  const infusionPump = instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump';
+  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump) : null;
+  const suctionDpmSerial = instrument.suctionPump ? dpmSerial : undefined;
+  const suctionDpmValid = data.selectedDevices === undefined || Boolean(selectedDpm && selectedDpm.serial === suctionDpmSerial);
+  const suctionPump = instrument.suctionPump ? calculateSuctionPump(instrument.suctionPump, data.suctionPump, suctionDpmValid) : null;
   const inspections = data.inspections.map((item) => ({
     ...item,
     complete: Boolean(item.physical && item.function),
@@ -355,8 +482,11 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const physicalScore = inspectionRate === null
     ? null
     : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
-  const safety = instrument.id === 'centrifuge' ? calculateSafety(data.safety) : null;
-  const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete : performance.length > 0 && performance.every((row) => row.result !== null);
+  const safety = ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.id) ? calculateSafety(data.safety) : null;
+  const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete
+    : suctionPump ? suctionPump.complete
+      : infusionPump ? performance.length > 0 && performance.every((row) => row.result !== null) && pumpOcclusion !== null
+        : performance.length > 0 && performance.every((row) => row.result !== null);
   const performanceRate = weighing
     ? weighing.pass === null ? null : weighing.pass ? 100 : 0
     : sphygmomanometer
@@ -366,11 +496,19 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
           + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.up.pass), 0) * 15 / 6
           + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.down.pass), 0) * 15 / 6) / 90) * 100
         : null
+      : infusionPump
+        ? performanceComplete ? ((performance.filter((row) => row.result?.pass).length / performance.length) * 100 + Number(pumpOcclusion?.pass) * 100) / 2 : null
+      : suctionPump
+        ? performanceComplete ? (suctionPump.pressureReadings.reduce((sum, point) => sum + Number(point.up?.pass) + Number(point.down?.pass), 0) / (suctionPump.pressureReadings.length * 2)) * 100 : null
     : performanceComplete ? (performance.filter((row) => row.result?.pass === true).length / performance.length) * 100 : null;
   const performanceScore = weighing
     ? weighing.pass === null ? null : weighing.pass ? instrument.score.performanceWeight : 0
     : sphygmomanometer
       ? performanceRate === null ? null : performanceRate * instrument.score.performanceWeight / 100
+    : infusionPump
+      ? performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0
+    : suctionPump
+      ? performanceComplete ? performanceRate === 100 && suctionPump.maximumVacuumPass ? instrument.score.performanceWeight : 0 : null
     : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
   const safetyScore = safety ? safety.score : 0;
   const score = physicalScore !== null && performanceScore !== null && safetyScore !== null
@@ -398,6 +536,14 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       missing.push(`Digital Pressure Meter ${selectedDpm.serial} tidak cocok dengan kurva sertifikat ${dpmSerial} pada workbook.`);
     }
   }
+  if (infusionPump && data.selectedDevices) {
+    if (!selectedPumpAnalyzer) missing.push(`Pilih Infusion Device Analyzer dengan nomor seri ${pumpAnalyzerSerial}.`);
+    else if (selectedPumpAnalyzer.serial !== pumpAnalyzerSerial) missing.push(`Kurva koreksi hanya tersedia untuk Infusion Device Analyzer ${pumpAnalyzerSerial}.`);
+  }
+  if (instrument.suctionPump && data.selectedDevices && suctionDpmSerial) {
+    if (!selectedDpm) missing.push(`Pilih Digital Pressure Meter dengan nomor seri ${suctionDpmSerial}.`);
+    else if (selectedDpm.serial !== suctionDpmSerial) missing.push(`Kurva koreksi hanya tersedia untuk Digital Pressure Meter ${suctionDpmSerial}.`);
+  }
   if (!environment.temperature || !environment.humidity) missing.push('Data suhu dan kelembaban ruangan');
   if (environment.errors.length) missing.push(...environment.errors);
   if (!inspectionComplete) missing.push('Pemeriksaan fisik dan fungsi');
@@ -414,11 +560,43 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       if (!point.up.complete) missing.push(`3 bacaan DPM arah naik pada ${point.setting} mmHg (rentang 0–300 mmHg)`);
       if (!point.down.complete) missing.push(`3 bacaan DPM arah turun pada ${point.setting} mmHg (rentang 0–300 mmHg)`);
     }
+  } else if (instrument.suctionPump) {
+    if (suctionPump?.maximumVacuumReading === null) missing.push('Bacaan tekanan daya hisap maksimum');
+    else if (suctionPump?.maximumVacuumReadingPass === false) missing.push(`Daya hisap maksimum harus mencapai minimal ${instrument.suctionPump.minimumVacuumMmHg} mmHg`);
+    if (suctionPump?.maximumVacuumSeconds === null) missing.push('Waktu mencapai vakum maksimum yang valid');
+    for (const point of instrument.suctionPump.pressurePoints) {
+      const input = data.suctionPump?.pressureReadings.find((item) => item.setting === point);
+      if (!input || input.up.length !== 3 || input.up.some((value) => number(value) === null)) missing.push(`3 bacaan DPM arah naik pada ${point} mmHg`);
+      if (!input || input.down.length !== 3 || input.down.some((value) => number(value) === null)) missing.push(`3 bacaan DPM arah turun pada ${point} mmHg`);
+    }
+  } else if (infusionPump) {
+    if (!data.infusionPump?.channel) missing.push('Channel Infusion Device Analyzer');
+    if (!data.infusionPump?.occlusionReadings.every((value) => number(value) !== null)) missing.push('6 bacaan uji occlusion');
+    if (performance.some((row) => row.result === null)) missing.push('Bacaan laju aliran pada seluruh titik ukur');
   } else if (!performanceComplete) missing.push('Titik ukur, bacaan, dan ketidakpastian kinerja');
   if (safety && !safety.complete) missing.push('Semua pemeriksaan keselamatan listrik');
+  if (instrument.id === 'fetal-doppler') {
+    const safetyMeasurements: [string, string][] = [
+      [data.safety.voltage, 'Tegangan jala-jala'],
+      [data.safety.earthResistance, 'Resistansi pembumian protektif'],
+      [data.safety.equipmentLeakage, 'Arus bocor peralatan'],
+      [data.safety.appliedLeakage, 'Arus bocor bagian yang diaplikasikan'],
+      [data.safety.insulationResistance, 'Resistansi isolasi'],
+    ];
+    safetyMeasurements.forEach(([value, label]) => {
+      const valid = label === 'Resistansi isolasi'
+        ? value.trim().toUpperCase() === 'OL' || number(value) !== null
+        : number(value) !== null;
+      if (!valid) missing.push(label);
+    });
+    if (!data.safety.earthMeets || !data.safety.equipmentLeakageMeets
+      || !data.safety.appliedLeakageMeets || !data.safety.insulationMeets) {
+      missing.push('Status memenuhi pada pemeriksaan keselamatan listrik');
+    }
+  }
   const referenceValues = [data.references.calibratorResolution, data.references.calibratorUncertainty, data.references.uutResolution].map(number);
   const validReferenceValues = referenceValues.filter((value): value is number => value !== null);
-  if (!weighing && !sphygmomanometer && (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0)) {
+  if (!weighing && !sphygmomanometer && !infusionPump && !instrument.suctionPump && (validReferenceValues.length !== 3 || validReferenceValues[0] <= 0 || validReferenceValues[1] < 0 || validReferenceValues[2] <= 0)) {
     missing.push('Resolusi dan ketidakpastian standar harus valid');
   }
 
@@ -432,6 +610,8 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     performanceScore,
     weighing,
     sphygmomanometer,
+    pumpOcclusion,
+    suctionPump,
     safety,
     safetyScore,
     score,

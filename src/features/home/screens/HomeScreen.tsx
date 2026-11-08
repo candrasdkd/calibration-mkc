@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Navbar } from '../../../components/Navbar';
 import { calculateRecord } from '../../../core/calculations';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { getInstrument } from '../../../core/instruments';
@@ -27,18 +28,11 @@ export default function HomeScreen() {
     return instrument ? !calculateRecord(instrument, record.data).complete : false;
   }).length, [records]);
   const reviewCount = useMemo(() => records.filter((record) => !record.isDemo
-    && (!record.data.identity.documentNumber.trim() || !record.data.identity.issueDate.trim())).length, [records]);
+    && (!record.data.identity.documentNumber.trim() || !record.data.identity.orderNumber?.trim() || !record.data.identity.issueDate.trim())).length, [records]);
 
   return <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.topBar}>
-        <View style={styles.brandBlock}>
-          <View style={styles.brandMark}><Text style={styles.brandMarkText}>K</Text></View>
-          <View><Text style={styles.brandName}>KALIBRASI</Text><Text style={styles.brandCaption}>MEDICAL WORKSPACE</Text></View>
-        </View>
-        <View style={styles.localBadge}><View style={styles.localDot} /><Text style={styles.localText}>LOKAL</Text></View>
-      </View>
-
+    <Navbar title="KALIBRASI" subtitle="MEDICAL WORKSPACE" />
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <View style={styles.welcomeBlock}>
         <Text style={styles.eyebrow}>RUANG KERJA</Text>
         <Text style={styles.welcomeTitle}>{role === 'admin' ? 'Halo, Admin.' : 'Halo, Teknisi.'}</Text>

@@ -126,6 +126,49 @@ export const instruments: Instrument[] = [
     score: { performanceThreshold: 30, performanceWeight: 90, physicalWeight: 10 },
   },
   {
+    id: 'infusion-pump',
+    name: 'Infusion Pump',
+    subtitle: 'Laju aliran, occlusion, dan keselamatan listrik',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Infusion Device Analyzer', 'Gossen Metrawatt', 'Seculife IF Pro', '73199911066'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kontak catu daya', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [10, 50, 100, 150, 300].map((setting) => ({ id: String(setting), label: 'Laju aliran', setting: String(setting), unit: 'mL/h', count: 6, tolerancePercent: '10', formula: 'infusionFlow' as const })),
+    references: { calibratorResolution: '0.01', calibratorUncertainty: '0', uutResolution: '0.01' },
+    score: { performanceThreshold: 85, performanceWeight: 50, physicalWeight: 10 },
+  },
+  {
+    id: 'syringe-pump',
+    name: 'Syringe Pump',
+    subtitle: 'Laju aliran, occlusion, dan keselamatan listrik',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Infusion Device Analyzer', 'Gossen Metrawatt', 'Seculife IF Pro', '73199911066'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kontak catu daya', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [10, 25, 50, 75, 100].map((setting) => ({ id: String(setting), label: 'Laju aliran', setting: String(setting), unit: 'mL/h', count: 6, tolerancePercent: '10', formula: 'infusionFlow' as const })),
+    references: { calibratorResolution: '0.01', calibratorUncertainty: '0', uutResolution: '0.01' },
+    score: { performanceThreshold: 85, performanceWeight: 50, physicalWeight: 10 },
+  },
+  {
+    id: 'suction-pump',
+    name: 'Suction Pump',
+    subtitle: 'Tekanan vakum, waktu daya hisap, dan keselamatan listrik',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Digital Pressure Meter', 'Gossen Metrawatt', 'Seculife DP Pro', '732129100NNS081037'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tabung dan selang'],
+    performanceRows: [],
+    references: { calibratorResolution: '20', calibratorUncertainty: '0.31', uutResolution: '20' },
+    score: { performanceThreshold: 100, performanceWeight: 50, physicalWeight: 10 },
+    suctionPump: { pressurePoints: [-200, -300, -400, -500, -600], minimumVacuumMmHg: 300 },
+  },
+  {
     id: 'adult-scale-digital',
     name: 'Timbangan Dewasa Digital',
     subtitle: 'Digital · kapasitas 150 kg · resolusi 0,1 kg',
@@ -212,7 +255,7 @@ export function createInitialData(instrumentId: string): CalibrationData {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return {
     identity: {
-      customerId: '', documentNumber: '', labelNumber: '', brand: '', model: '', serial: '',
+      customerId: '', documentNumber: '', orderNumber: '', labelNumber: '', brand: '', model: '', serial: '',
       capacity: instrument.weighingScale ? String(instrument.weighingScale.capacityKg) : instrument.sphygmomanometer ? String(instrument.sphygmomanometer.capacityMmHg) : '',
       accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : instrument.sphygmomanometer ? `Kelas ${instrument.sphygmomanometer.accuracyClass}` : '',
       technician: '', receivedDate: today, testDate: today, issueDate: '', room: '', customer: '', address: '', city: '', method: '',
@@ -235,9 +278,19 @@ export function createInitialData(instrumentId: string): CalibrationData {
       rapidDeflationSeconds: '',
       pressureReadings: instrument.sphygmomanometer.pressurePoints.map((setting) => ({ setting, up: readings(3), down: readings(3) })),
     } } : {}),
+    ...(instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump' ? { infusionPump: {
+      channel: 'Channel 1', occlusionReadings: readings(6),
+    } } : {}),
+    ...(instrument.suctionPump ? { suctionPump: {
+      pressureReadings: instrument.suctionPump.pressurePoints.map((setting) => ({ setting, up: readings(3), down: readings(3) })),
+      maximumVacuumReading: '',
+      maximumVacuumSeconds: '',
+    } } : {}),
     safety: {
       voltage: '', earthType: '2', earthResistance: '',
-      leakageType: '1', equipmentLeakage: '', appliedLeakage: '', appliedLeakageNA: false, insulationResistance: '',
+      earthMeets: '', leakageType: '1', equipmentLeakage: '', equipmentLeakageMeets: '',
+      appliedLeakage: '', appliedLeakageMeets: '', appliedLeakageNA: false,
+      insulationResistance: '', insulationMeets: '',
     },
   };
 }

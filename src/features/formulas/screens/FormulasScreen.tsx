@@ -15,6 +15,7 @@ const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
   centrifugeTime: { title: 'Waktu putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √3', acceptance: '|C + U95| ≤ MPE' },
   fetalHeartRate: { title: 'Heart rate', correction: 'C = |x̄| − |setting|', repeatability: 'UA = s / √6', acceptance: '|C| + U95 ≤ MPE' },
   flowmeter: { title: 'Laju aliran', correction: 'C = |setting| − |x̄|', repeatability: 'UA = s / √5', acceptance: '|C| + U95 ≤ MPE' },
+  infusionFlow: { title: 'Laju aliran pompa', correction: 'C = interceptChannel + slopeChannel × x̄; x̄corr = x̄ + C', repeatability: 'UA = s / √3', acceptance: '|x̄corr − setting| / setting ≤ 10%' },
 };
 
 const excelQuestions = [
@@ -27,6 +28,14 @@ const excelQuestions = [
   'Sphygmomanometer: batas kesalahan tekanan pada OLAH DATA tertulis ±4,5 mmHg, sedangkan SCORING menghitung dengan 4 mmHg. Batas mana yang harus dipakai?',
   'Sphygmomanometer: batas penurunan kebocoran tertulis <15 mmHg pada OLAH DATA, tetapi SCORING menerima nilai ≤15 mmHg. Apakah nilai tepat 15 mmHg lulus?',
   'Sphygmomanometer: ada 12 bagian pemeriksaan fisik, tetapi rumus skor SCORING hanya menjumlahkan 10 baris pertama. Apakah seluruh 12 bagian harus dihitung?',
+  'Infusion/Syringe Pump: Excel menghitung U95 aliran, tetapi lulus hanya dari |galat / setting| ≤ 10%. U95 tetap untuk laporan saja atau perlu ikut keputusan lulus?',
+  'Infusion/Syringe Pump: Excel menghitung koreksi dan U95 occlusion, tetapi keputusan lulus memakai rata-rata enam bacaan mentah ≤ 20 psi. Apakah aturan ini memang yang dipakai?',
+  'Infusion/Syringe Pump: skor kinerja 50 poin diberikan saat skor blok flow + occlusion minimal 170% dari maksimum 200%. Apakah ambang 170% ini benar?',
+  'Suction Pump: nama file menyebut rentang 150–450 mmHg, tetapi titik uji di OLAH DATA adalah −200 sampai −600 mmHg. Rentang mana yang harus menjadi acuan?',
+  'Suction Pump: Excel menghitung U95 tekanan, tetapi keputusan lulus memakai |galat / setting| ≤ 10% tanpa U95. U95 memang hanya untuk pelaporan?',
+  'Suction Pump: LK menulis batas tekanan maksimum ≥ −300, tetapi baris bacaannya tidak masuk ke rumus skor. Aplikasi menafsirkan input sebagai besar vakum ≥ 300 mmHg dan meminta syarat ini lulus sebelum form selesai. Apakah interpretasi ini benar?',
+  'Suction Pump: Laporan Hasil menampilkan −4,5 di baris “Vacuum (mmHg)”, padahal nilainya terhubung ke waktu 4,5 detik dan batas ≤ 10 detik. Apakah satuan di workbook salah?',
+  'Suction Pump: titik 0 mmHg menghasilkan #DIV/0! di SCORING dan tidak masuk hitungan skor. Apakah titik nol memang hanya baseline dan tidak perlu diuji?',
 ];
 
 function FormulaStep({ number, title, equation, detail }: { number: string; title: string; equation: string; detail: string }) {
@@ -74,6 +83,10 @@ function FormulaCard({
   const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
   const summary = instrument.sphygmomanometer
     ? `${instrument.sphygmomanometer.pressurePoints.length} titik tekanan · 3 bacaan per arah`
+    : instrument.suctionPump
+      ? `${instrument.suctionPump.pressurePoints.length} titik vakum · 3 bacaan per arah + uji waktu maksimum`
+    : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump'
+      ? `${instrument.performanceRows.length} titik laju aliran · 6 bacaan + uji occlusion`
     : instrument.weighingScale
       ? `${instrument.weighingScale.points.length} titik beban · uji daya ulang ${instrument.weighingScale.repeatabilityLoadKg} kg`
     : `${instrument.performanceRows.length} titik uji · ${readingCounts.length === 1 ? `${readingCounts[0]} bacaan per titik` : `${readingCounts[0]}–${readingCounts[readingCounts.length - 1]} bacaan per titik`}`;
@@ -88,7 +101,48 @@ function FormulaCard({
       <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
     </Pressable>
     {expanded ? <View style={styles.formulaBody}>
-      {instrument.sphygmomanometer ? <>
+      {instrument.suctionPump ? <>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Titik dan langkah pengukuran</Text>
+          {instrument.suctionPump.pressurePoints.map((setting) => <ValueLine key={setting} label={`${Math.abs(setting)} mmHg vakum`} value="3 bacaan arah naik · 3 bacaan arah turun" />)}
+          <ValueLine label="Daya hisap maksimum" value={`Tekanan vakum ≥ ${instrument.suctionPump.minimumVacuumMmHg} mmHg · waktu ≤ 10 detik`} />
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
+          <FormulaStep number="1" title="Tanda bacaan" equation="x̄ = −rata-rata(bacaan DPM)" detail="Bacaan diisi tanpa tanda minus di form; aplikasi mengubahnya menjadi tekanan bertanda negatif seperti tabel scoring Excel." />
+          <FormulaStep number="2" title="Koreksi regresi drift" equation="Naik: C = 0,2940837 + 0,003441824 × x̄; Turun: C = 0,3211573 + 0,003504638 × x̄" detail={`Koefisien mengikuti lembar DRIFT untuk DPM nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3]}.`} />
+          <FormulaStep number="3" title="Ketidakpastian" equation="U95 = t(0,975; νeff) × √Σui²" detail="Komponen: resolusi DPM 20 mmHg, simpangan baku tiga bacaan, drift sesuai setting/arah, dan U95 sertifikat DPM maksimum 0,31 mmHg; dibagi reliabilitas workbook." />
+          <FormulaStep number="4" title="Keputusan" equation="Galat = x̄ + C − setting; lulus jika |Galat / setting| ≤ 10%" detail="Workbook menghitung U95 untuk dilaporkan, tetapi kriteria lulus tekanan memakai persentase galat tanpa menambahkan U95." />
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Bobot skor</Text>
+          <ValueLine label="Keselamatan listrik" value="40 poin" />
+          <ValueLine label="Pemeriksaan fisik dan fungsi" value="10 poin · ambang 70%" />
+          <ValueLine label="Kinerja" value="50 poin jika semua tekanan dan waktu maksimum lulus" />
+        </View>
+      </> : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump' ? <>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Titik ukur laju aliran</Text>
+          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value="6 bacaan · toleransi 10%" />)}
+          <ValueLine label="Occlusion" value="Setting 100 mL/h · 6 bacaan · batas rata-rata ≤ 20 psi" />
+        </View>
+        <View style={styles.formulaGroup}>
+          <Text style={styles.formulaGroupTitle}>Koreksi analyzer dan ketidakpastian</Text>
+          <FormulaStep number="1" title="Koreksi laju aliran" equation="C = interceptChannel + slopeChannel × x̄; x̄corr = x̄ + C" detail="Koefisien intercept dan slope berbeda pada Channel 1, 2, dan 3; dipilih di form pengerjaan." />
+          {(['Channel 1', 'Channel 2', 'Channel 3'] as const).map((channel, index) => {
+            const coefficients = [
+              [-0.0044382464, -0.6893402185, 0.0007131475, -0.3227629185],
+              [-0.0084894465, -0.9974586655, 0.0007349966, -0.1939037013],
+              [-0.0216394107, 0.0314763681, 0.0008032538, -0.0241376844],
+            ][index];
+            return <ValueLine key={channel} label={channel} value={`Flow b=${coefficients[0]} · a=${coefficients[1]} | Occlusion b=${coefficients[2]} · a=${coefficients[3]}`} />;
+          })}
+          <FormulaStep number="2" title="U95 tiap titik" equation="uc = √[(0,01/√3)² + (s/√3)² + (drift/√3)² + (U95 standar/2)²]; U95 = t × uc" detail="Drift dan U95 standar diinterpolasi dari tabel workbook pada setting uji. Derajat bebas efektif mengikuti reliabilitas 50, 2, 50, 50." />
+          <FormulaStep number="3" title="Keputusan laju aliran" equation="Galat = x̄corr − setting; lulus jika |Galat / setting| ≤ 10%" detail="U95 ditampilkan di hasil dan laporan. Rumus skor Excel menentukan lulus dari persentase galat terhadap setting." />
+          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail="Kriteria occlusion workbook membandingkan rata-rata enam bacaan mentah dengan batas 20 psi." />
+          <ValueLine label="Bobot skor" value="Keselamatan listrik 40 · fisik/fungsi 10 · kinerja 50 (nilai blok flow + occlusion minimal 170%)" />
+        </View>
+      </> : instrument.sphygmomanometer ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Alur dan batas pengujian</Text>
           <FormulaStep number="1" title="Kebocoran" equation="Pompa 250 mmHg; ukur penurunan setelah 1 menit" detail="Batas pada rumus yang dipakai aplikasi: ≤ 15 mmHg." />
@@ -174,7 +228,11 @@ function FormulaCard({
           </>}
         </View>
       </>}
-      <Text style={styles.readOnlyNote}>{instrument.sphygmomanometer
+      <Text style={styles.readOnlyNote}>{instrument.suctionPump
+        ? `Regresi koreksi dan drift/U95 terkunci pada Digital Pressure Meter ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}.`
+        : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump'
+          ? `Koefisien koreksi dan U95 mengikuti sertifikat Infusion Device Analyzer ${instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3] ?? 'yang tercantum di workbook'}; Channel dipilih pada form pengerjaan.`
+        : instrument.sphygmomanometer
         ? `Kurva dan U95 DPM terikat pada nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}. Standar dengan nomor seri lain belum bisa dihitung memakai kurva ini.`
         : 'Rumus dan aturan hitung hanya untuk dibaca. Nilai acuan di atas bisa diedit khusus pada pekerjaan yang sedang dibuka.'}</Text>
     </View> : null}

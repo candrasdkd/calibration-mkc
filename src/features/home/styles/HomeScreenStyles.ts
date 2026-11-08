@@ -2,13 +2,9 @@ import { StyleSheet } from 'react-native';
 import { colors } from '../../../core/theme';
 
 export const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F4F7F8' },
-  content: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 27 },
-  brandBlock: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandMark: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  brandMarkText: { color: 'white', fontWeight: '900', fontSize: 22 }, brandName: { color: colors.ink, fontSize: 12, fontWeight: '900', letterSpacing: 1.1 }, brandCaption: { color: colors.muted, fontSize: 8, fontWeight: '800', letterSpacing: 1, marginTop: 3 },
-  localBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#CFE4DF', backgroundColor: '#EAF5F2', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 999 }, localDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }, localText: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 0.7 },
+  safe: { flex: 1, backgroundColor: colors.surface },
+  scroll: { flex: 1, backgroundColor: colors.canvas },
+  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 34 },
   welcomeBlock: { marginBottom: 19 }, eyebrow: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 }, welcomeTitle: { color: colors.ink, fontSize: 30, lineHeight: 36, fontWeight: '900', letterSpacing: -0.7, marginTop: 6 }, welcomeHint: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 5 },
   roleSwitch: { flexDirection: 'row', backgroundColor: '#E8EEF0', borderRadius: 13, padding: 4, marginBottom: 20 }, roleOption: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 10 }, roleOptionActive: { backgroundColor: colors.surface, shadowColor: colors.ink, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 }, roleOptionText: { color: colors.muted, fontSize: 13, fontWeight: '700' }, roleOptionTextActive: { color: colors.ink, fontWeight: '900' },
   overviewCard: { backgroundColor: colors.ink, borderRadius: 24, padding: 20, marginBottom: 25 }, overviewHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, overviewEyebrow: { color: '#A8D8CE', fontSize: 9, fontWeight: '900', letterSpacing: 1.4 }, overviewTitle: { color: 'white', fontSize: 21, fontWeight: '900', marginTop: 5 }, overviewMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' }, overviewMarkText: { color: 'white', fontSize: 17, fontWeight: '900' },
