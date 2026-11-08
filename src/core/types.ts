@@ -120,7 +120,7 @@ export interface Instrument {
   score: InstrumentScore;
   weighingScale?: WeighingScaleConfig;
   sphygmomanometer?: SphygmomanometerConfig;
-  suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number };
+  suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number; maximumVacuumMmHg: number };
 }
 
 export interface IdentityData {

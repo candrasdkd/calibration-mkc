@@ -503,6 +503,7 @@ function SuctionPumpStep({ data, result, config, onChange }: {
   config: NonNullable<Instrument['suctionPump']>;
   onChange: (data: SuctionPumpData) => void;
 }) {
+  const legacy = data.pressureReadings.some((point) => point.up.length === 3);
   const updateReading = (setting: number, direction: 'up' | 'down', index: number, value: string) => onChange({
     ...data,
     pressureReadings: data.pressureReadings.map((point) => point.setting !== setting ? point : {
@@ -513,7 +514,7 @@ function SuctionPumpStep({ data, result, config, onChange }: {
   const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
   return <>
     <Card>
-      <Heading title="Uji tekanan vakum" hint="Masukkan tiga bacaan DPM saat tekanan naik dan tiga saat turun. Angka dimasukkan tanpa tanda minus, seperti workbook." />
+      <Heading title="Uji tekanan vakum" hint={`Masukkan ${legacy ? 3 : 6} bacaan DPM saat tekanan naik dan saat turun. Angka dimasukkan tanpa tanda minus.`} />
       {data.pressureReadings.map((point) => {
         const calculated = result.pressureReadings.find((item) => item.setting === point.setting);
         return <View key={point.setting} style={styles.performanceCard}>
@@ -534,9 +535,11 @@ function SuctionPumpStep({ data, result, config, onChange }: {
       })}
     </Card>
     <Card>
-      <Heading title="Daya hisap maksimum" hint={`Atur alat hingga vakum minimal ${config.minimumVacuumMmHg} mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.`} />
+      <Heading title="Daya hisap maksimum" hint={legacy
+        ? 'Atur alat hingga vakum minimal 300 mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.'
+        : `Atur vakum pada rentang ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.`} />
       <Field label="Bacaan tekanan vakum maksimum" value={data.maximumVacuumReading} onChange={(value) => onChange({ ...data, maximumVacuumReading: value })} keyboard="decimal-pad" suffix="mmHg · isi besar vakum" />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas vakum ≥ {config.minimumVacuumMmHg} mmHg</Text>{outcome(result.maximumVacuumReadingPass)}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>{legacy ? 'Batas vakum ≥ 300 mmHg' : `Batas vakum ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg`}</Text>{outcome(result.maximumVacuumReadingPass)}</View>
       <Field label="Waktu mencapai vakum maksimum" value={data.maximumVacuumSeconds} onChange={(value) => onChange({ ...data, maximumVacuumSeconds: value })} keyboard="decimal-pad" suffix="detik" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.maximumVacuumPass)}</View>
     </Card>
@@ -567,7 +570,7 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
       ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} onChange={updateSphygmomanometer} />
       : instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} />
       : instrument.suctionPump ? null : <Card>
-      <Heading title="Pengujian kinerja" hint={instrument.id === 'flowmeter' ? 'Workbook menampilkan ±20% pada label, tetapi rumus ambang di sel menggunakan 10%. Perhitungan aplikasi mengikuti rumus 10%.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
+      <Heading title="Pengujian kinerja" hint={instrument.id === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
       {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
       {data.performance.map((row, rowIndex) => {
         const calculated = result.performance[rowIndex].result;
@@ -578,7 +581,7 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
           </View>
           <View style={styles.settingRow}>
             <View style={styles.settingField}><Field label="Setting" value={row.setting} onChange={(value) => updatePerformance(rowIndex, 'setting', value)} keyboard="decimal-pad" suffix={row.unit} /></View>
-            <Text style={styles.toleranceNote}>Toleransi {row.tolerancePercent}%</Text>
+            <Text style={styles.toleranceNote}>Toleransi {row.formula === 'fetalHeartRate' ? '±5 BPM' : `±${row.formula === 'flowmeter' ? '20' : row.tolerancePercent}%`}</Text>
           </View>
           <Text style={styles.labelLike}>Bacaan terukur · {row.readings.length} kali sesuai Excel</Text>
           <Text style={styles.readingsHint}>Ketuk setiap kolom untuk memasukkan atau mengubah angka bacaan.</Text>
@@ -644,6 +647,7 @@ function PressureResultTable({ title, direction, pressureReadings }: {
 
 function ResultStep({ data, result, instrument }: { data: CalibrationData; result: CalculationResult; instrument: Instrument }) {
   const tone = result.complete ? result.score !== null && result.score >= 70 ? 'good' : 'bad' : 'wait';
+  const legacySuction = data.suctionPump?.pressureReadings.some((point) => point.up.length === 3) ?? false;
   return <>
     <Card style={result.complete && result.score !== null && result.score < 70 ? styles.badOutcome : styles.goodOutcome}>
       <Text style={styles.outcomeKicker}>{result.complete ? 'HASIL PENGUJIAN' : 'STATUS PENGISIAN'}</Text>
@@ -689,7 +693,7 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
           <ValueLine label="Galat / toleransi 10%" value={item ? `${fmt(item.error)} mmHg / ${fmt(Math.abs(item.error / point.setting) * 100, 2)}%` : '—'} />
         </View>;
       }))}
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Tekanan maksimum / batas ≥ {instrument.suctionPump?.minimumVacuumMmHg} mmHg</Text><Badge text={result.suctionPump.maximumVacuumReadingPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumReadingPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumReadingPass === null ? 'wait' : result.suctionPump.maximumVacuumReadingPass ? 'good' : 'bad'} /></View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>{legacySuction ? 'Tekanan maksimum / batas ≥ 300 mmHg' : `Tekanan maksimum / batas ${instrument.suctionPump?.minimumVacuumMmHg}–${instrument.suctionPump?.maximumVacuumMmHg} mmHg`}</Text><Badge text={result.suctionPump.maximumVacuumReadingPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumReadingPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumReadingPass === null ? 'wait' : result.suctionPump.maximumVacuumReadingPass ? 'good' : 'bad'} /></View>
       <ValueLine label="Tekanan terukur" value={result.suctionPump.maximumVacuumReading === null ? '—' : `${fmt(result.suctionPump.maximumVacuumReading)} mmHg`} />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Waktu mencapai vakum maksimum / batas 10 detik</Text><Badge text={result.suctionPump.maximumVacuumPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumPass === null ? 'wait' : result.suctionPump.maximumVacuumPass ? 'good' : 'bad'} /></View>
       <ValueLine label="Waktu terukur" value={result.suctionPump.maximumVacuumSeconds === null ? '—' : `${fmt(result.suctionPump.maximumVacuumSeconds)} detik`} />

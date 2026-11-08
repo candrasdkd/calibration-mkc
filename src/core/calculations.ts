@@ -257,7 +257,7 @@ function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementR
   const setting = number(row.setting);
   const parsedReadings = row.readings.map(number);
   const referenceValues = [references.calibratorResolution, references.calibratorUncertainty, references.uutResolution].map(number);
-  const tolerancePercent = number(row.tolerancePercent);
+  const tolerancePercent = row.formula === 'flowmeter' ? 20 : number(row.tolerancePercent);
   const readings = parsedReadings.filter((value): value is number => value !== null);
   const parsedReferences = referenceValues.filter((value): value is number => value !== null);
   if (setting === null || setting <= 0 || row.readings.length < 2 || readings.length !== row.readings.length
@@ -274,14 +274,12 @@ function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementR
     correction = Math.abs(setting) - Math.abs(mean);
   }
 
-  const divisor = row.formula === 'fetalHeartRate' ? Math.sqrt(6)
-    : row.formula === 'flowmeter' ? Math.sqrt(5) : Math.sqrt(3);
-  const ua = sampleStandardDeviation(readings) / divisor;
+  const ua = sampleStandardDeviation(readings) / Math.sqrt(readings.length);
   const calibratorUncertainty = parsedReferences[1] / 2;
   const uutResolutionUncertainty = (parsedReferences[2] / 2) / Math.sqrt(3);
   const calibratorResolutionUncertainty = (parsedReferences[0] / 2) / Math.sqrt(3);
   const u95 = Math.sqrt(ua ** 2 + calibratorUncertainty ** 2 + uutResolutionUncertainty ** 2 + calibratorResolutionUncertainty ** 2) * 2;
-  const tolerance = setting * (tolerancePercent / 100);
+  const tolerance = row.formula === 'fetalHeartRate' ? tolerancePercent : setting * (tolerancePercent / 100);
   const testValue = row.formula === 'centrifugeSpeed' || row.formula === 'centrifugeTime'
     ? Math.abs(correction + u95)
     : Math.abs(correction) + Math.abs(u95);
@@ -354,7 +352,7 @@ function calculatePumpFlow(row: PerformanceEntry, channel: string): CalculatedPe
   return { setting, mean, correction, correctedMean, error, ua, u95, tolerance, testValue, pass: testValue <= tolerance, readings: values };
 }
 
-function calculatePumpOcclusion(input: InfusionPumpData | undefined): CalculationResult['pumpOcclusion'] {
+function calculatePumpOcclusion(input: InfusionPumpData | undefined, limit: number): CalculationResult['pumpOcclusion'] {
   if (!input || input.occlusionReadings.length !== 6) return null;
   const profile = pumpFlowChannels[input.channel as keyof typeof pumpFlowChannels];
   const readings = input.occlusionReadings.map(number);
@@ -366,7 +364,7 @@ function calculatePumpOcclusion(input: InfusionPumpData | undefined): Calculatio
   const uncertaintyU95 = expandedUncertainty([
     0.01 / Math.sqrt(3), sampleStandardDeviation(values) / Math.sqrt(3), 0.012 / 2,
   ], [50, 2, 50]);
-  return { mean, correction, correctedMean, uncertaintyU95, limit: 20, pass: mean <= 20, readings: values };
+  return { mean, correction, correctedMean, uncertaintyU95, limit, pass: mean <= limit, readings: values };
 }
 
 const suctionDrift = {
@@ -375,11 +373,14 @@ const suctionDrift = {
 } as const;
 
 function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, data: SuctionPumpData | undefined, standardValid: boolean): SuctionPumpResult {
-  const pressureReadings = config.pressurePoints.map((setting) => {
+  const legacy = Boolean(data?.pressureReadings.some((point) => !config.pressurePoints.includes(point.setting)));
+  const settings = legacy ? (data?.pressureReadings ?? []).map((point) => point.setting) : config.pressurePoints;
+  const repeatCount = legacy ? 3 : 6;
+  const pressureReadings = settings.map((setting) => {
     const input = data?.pressureReadings.find((point) => point.setting === setting);
     const calculateDirection = (direction: 'up' | 'down') => {
       const readings = (input?.[direction] ?? []).map(number);
-      if (!standardValid || readings.length !== 3 || readings.some((value) => value === null)) return null;
+      if (!standardValid || readings.length !== repeatCount || readings.some((value) => value === null)) return null;
       const values = readings as number[];
       const mean = average(values);
       const signedMean = -mean;
@@ -390,7 +391,7 @@ function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, da
       const correction = intercept + slope * signedMean;
       const correctedMean = signedMean + correction;
       const error = correctedMean - setting;
-      const ua = sampleStandardDeviation(values) / Math.sqrt(3);
+      const ua = sampleStandardDeviation(values) / Math.sqrt(values.length);
       const uncertaintyU95 = expandedUncertainty([
         (20 * 0.5 / 3) / Math.sqrt(6), ua, drift / Math.sqrt(3), 0.31 / 2,
       ], [50, 2, 50, 50]);
@@ -405,7 +406,9 @@ function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, da
   return {
     pressureReadings,
     maximumVacuumReading,
-    maximumVacuumReadingPass: maximumVacuumReading === null ? null : Math.abs(maximumVacuumReading) >= config.minimumVacuumMmHg,
+    maximumVacuumReadingPass: maximumVacuumReading === null ? null : legacy
+      ? Math.abs(maximumVacuumReading) >= 300
+      : Math.abs(maximumVacuumReading) >= config.minimumVacuumMmHg && Math.abs(maximumVacuumReading) <= config.maximumVacuumMmHg,
     maximumVacuumSeconds,
     maximumVacuumPass: maximumVacuumSeconds === null ? null : maximumVacuumSeconds <= 10,
     complete,
@@ -464,7 +467,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       : calculatePerformanceRow(row, data.references),
   }));
   const infusionPump = instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump';
-  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump) : null;
+  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump, instrument.id === 'syringe-pump' ? 21 : 20) : null;
   const suctionDpmSerial = instrument.suctionPump ? dpmSerial : undefined;
   const suctionDpmValid = data.selectedDevices === undefined || Boolean(selectedDpm && selectedDpm.serial === suctionDpmSerial);
   const suctionPump = instrument.suctionPump ? calculateSuctionPump(instrument.suctionPump, data.suctionPump, suctionDpmValid) : null;
@@ -562,12 +565,16 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     }
   } else if (instrument.suctionPump) {
     if (suctionPump?.maximumVacuumReading === null) missing.push('Bacaan tekanan daya hisap maksimum');
-    else if (suctionPump?.maximumVacuumReadingPass === false) missing.push(`Daya hisap maksimum harus mencapai minimal ${instrument.suctionPump.minimumVacuumMmHg} mmHg`);
+    else if (suctionPump?.maximumVacuumReadingPass === false) missing.push(data.suctionPump?.pressureReadings.some((point) => point.up.length === 3)
+      ? 'Daya hisap maksimum harus mencapai minimal 300 mmHg'
+      : `Daya hisap maksimum harus berada pada ${instrument.suctionPump.minimumVacuumMmHg}–${instrument.suctionPump.maximumVacuumMmHg} mmHg`);
     if (suctionPump?.maximumVacuumSeconds === null) missing.push('Waktu mencapai vakum maksimum yang valid');
-    for (const point of instrument.suctionPump.pressurePoints) {
-      const input = data.suctionPump?.pressureReadings.find((item) => item.setting === point);
-      if (!input || input.up.length !== 3 || input.up.some((value) => number(value) === null)) missing.push(`3 bacaan DPM arah naik pada ${point} mmHg`);
-      if (!input || input.down.length !== 3 || input.down.some((value) => number(value) === null)) missing.push(`3 bacaan DPM arah turun pada ${point} mmHg`);
+    const legacy = data.suctionPump?.pressureReadings.some((point) => point.up.length === 3) ?? false;
+    const repeatCount = legacy ? 3 : 6;
+    for (const point of suctionPump?.pressureReadings ?? []) {
+      const input = data.suctionPump?.pressureReadings.find((item) => item.setting === point.setting);
+      if (!input || input.up.length !== repeatCount || input.up.some((value) => number(value) === null)) missing.push(`${repeatCount} bacaan DPM arah naik pada ${point.setting} mmHg`);
+      if (!input || input.down.length !== repeatCount || input.down.some((value) => number(value) === null)) missing.push(`${repeatCount} bacaan DPM arah turun pada ${point.setting} mmHg`);
     }
   } else if (infusionPump) {
     if (!data.infusionPump?.channel) missing.push('Channel Infusion Device Analyzer');

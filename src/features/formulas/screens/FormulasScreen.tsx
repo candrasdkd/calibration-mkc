@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
-import { Card, Field, Heading, ValueLine } from '../../../components/ui';
+import { Badge, Card, Field, Heading, ValueLine } from '../../../components/ui';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { getInstrument, instruments } from '../../../core/instruments';
 import { useRecords } from '../../work-orders/hooks/useRecords';
@@ -11,15 +11,14 @@ import type { MeasurementReferences, PerformanceFormula } from '../../../core/ty
 import type { FormulaDisplay } from '../types/FormulaDisplay';
 
 const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
-  centrifugeSpeed: { title: 'Kecepatan putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √3', acceptance: '|C + U95| ≤ MPE' },
-  centrifugeTime: { title: 'Waktu putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √3', acceptance: '|C + U95| ≤ MPE' },
-  fetalHeartRate: { title: 'Heart rate', correction: 'C = |x̄| − |setting|', repeatability: 'UA = s / √6', acceptance: '|C| + U95 ≤ MPE' },
-  flowmeter: { title: 'Laju aliran', correction: 'C = |setting| − |x̄|', repeatability: 'UA = s / √5', acceptance: '|C| + U95 ≤ MPE' },
+  centrifugeSpeed: { title: 'Kecepatan putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √n', acceptance: '|C + U95| ≤ MPE' },
+  centrifugeTime: { title: 'Waktu putar', correction: 'C = x̄ − setting', repeatability: 'UA = s / √n', acceptance: '|C + U95| ≤ MPE' },
+  fetalHeartRate: { title: 'Heart rate', correction: 'C = |x̄| − |setting|', repeatability: 'UA = s / √n', acceptance: '|C| + U95 ≤ 5 BPM' },
+  flowmeter: { title: 'Laju aliran', correction: 'C = |setting| − |x̄|', repeatability: 'UA = s / √n', acceptance: '|C| + U95 ≤ 20% × setting' },
   infusionFlow: { title: 'Laju aliran pompa', correction: 'C = interceptChannel + slopeChannel × x̄; x̄corr = x̄ + C', repeatability: 'UA = s / √3', acceptance: '|x̄corr − setting| / setting ≤ 10%' },
 };
 
 const excelQuestions = [
-  'Flowmeter: tabel memberi label ±20%, tetapi rumus batas menghitung setting × 10%. Batas yang dipakai seharusnya 10% atau 20%?',
   'Thermohygrometer: koreksi RH pada 50% untuk Thermohygro 4 tertulis +10,1%. Angka ini benar atau tanda koreksinya keliru?',
   'Timbangan digital: laporan memakai batas minimum U95 0,75 kg, sementara hitungan anggaran sekitar 0,076 kg. Apakah 0,75 memang disengaja atau seharusnya 0,075 kg?',
   'Timbangan mekanik: rumus U95 laporan pada titik 50 kg merujuk sel N92 dan N74. Apakah ini salah salin dan seharusnya memakai hasil titik 50 kg?',
@@ -29,13 +28,10 @@ const excelQuestions = [
   'Sphygmomanometer: batas penurunan kebocoran tertulis <15 mmHg pada OLAH DATA, tetapi SCORING menerima nilai ≤15 mmHg. Apakah nilai tepat 15 mmHg lulus?',
   'Sphygmomanometer: ada 12 bagian pemeriksaan fisik, tetapi rumus skor SCORING hanya menjumlahkan 10 baris pertama. Apakah seluruh 12 bagian harus dihitung?',
   'Infusion/Syringe Pump: Excel menghitung U95 aliran, tetapi lulus hanya dari |galat / setting| ≤ 10%. U95 tetap untuk laporan saja atau perlu ikut keputusan lulus?',
-  'Infusion/Syringe Pump: Excel menghitung koreksi dan U95 occlusion, tetapi keputusan lulus memakai rata-rata enam bacaan mentah ≤ 20 psi. Apakah aturan ini memang yang dipakai?',
   'Infusion/Syringe Pump: skor kinerja 50 poin diberikan saat skor blok flow + occlusion minimal 170% dari maksimum 200%. Apakah ambang 170% ini benar?',
-  'Suction Pump: nama file menyebut rentang 150–450 mmHg, tetapi titik uji di OLAH DATA adalah −200 sampai −600 mmHg. Rentang mana yang harus menjadi acuan?',
+  'Suction Pump: MK-24 masih berupa draf dan menetapkan rentang 150–450 mmHg, sedangkan Excel memakai titik −200 sampai −600 mmHg dan batas hisap maksimum ≥300 mmHg. Aplikasi mengikuti rentang MK-24 untuk pekerjaan baru; pastikan acuan final sebelum hasil resmi.',
   'Suction Pump: Excel menghitung U95 tekanan, tetapi keputusan lulus memakai |galat / setting| ≤ 10% tanpa U95. U95 memang hanya untuk pelaporan?',
-  'Suction Pump: LK menulis batas tekanan maksimum ≥ −300, tetapi baris bacaannya tidak masuk ke rumus skor. Aplikasi menafsirkan input sebagai besar vakum ≥ 300 mmHg dan meminta syarat ini lulus sebelum form selesai. Apakah interpretasi ini benar?',
   'Suction Pump: Laporan Hasil menampilkan −4,5 di baris “Vacuum (mmHg)”, padahal nilainya terhubung ke waktu 4,5 detik dan batas ≤ 10 detik. Apakah satuan di workbook salah?',
-  'Suction Pump: titik 0 mmHg menghasilkan #DIV/0! di SCORING dan tidak masuk hitungan skor. Apakah titik nol memang hanya baseline dan tidak perlu diuji?',
 ];
 
 function FormulaStep({ number, title, equation, detail }: { number: string; title: string; equation: string; detail: string }) {
@@ -81,10 +77,18 @@ function FormulaCard({
   const formulaRows = instrument.performanceRows.filter((row, index, rows) => rows.findIndex((item) => item.formula === row.formula) === index);
   const isActiveWork = Boolean(activeReferences && onReferenceChange);
   const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
+  const occlusionLimit = instrument.id === 'syringe-pump' ? 21 : 20;
+  const methodSource = ['centrifuge', 'fetal-doppler', 'flowmeter', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.id)
+    ? { label: 'Metode Kerja Kemenkes 2024 · MK-24 (draf)', tone: 'wait' as const }
+    : instrument.sphygmomanometer
+      ? { label: 'Excel 2026 · metode Kemenkes belum dikonfirmasi', tone: 'wait' as const }
+      : instrument.weighingScale
+        ? { label: 'Excel 2026 · belum dibahas di MK-24', tone: 'neutral' as const }
+        : { label: 'Acuan metode belum dipetakan', tone: 'neutral' as const };
   const summary = instrument.sphygmomanometer
     ? `${instrument.sphygmomanometer.pressurePoints.length} titik tekanan · 3 bacaan per arah`
     : instrument.suctionPump
-      ? `${instrument.suctionPump.pressurePoints.length} titik vakum · 3 bacaan per arah + uji waktu maksimum`
+      ? `${instrument.suctionPump.pressurePoints.length} titik vakum · 6 bacaan per arah + uji waktu maksimum`
     : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump'
       ? `${instrument.performanceRows.length} titik laju aliran · 6 bacaan + uji occlusion`
     : instrument.weighingScale
@@ -97,6 +101,7 @@ function FormulaCard({
         <Text style={styles.formulaTitle}>{instrument.name}</Text>
         <Text style={styles.formulaSubtitle}>{instrument.subtitle}</Text>
         <Text style={styles.formulaMeta}>{summary}</Text>
+        <View style={{ marginTop: 8 }}><Badge text={methodSource.label} tone={methodSource.tone} /></View>
       </View>
       <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
     </Pressable>
@@ -104,14 +109,14 @@ function FormulaCard({
       {instrument.suctionPump ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik dan langkah pengukuran</Text>
-          {instrument.suctionPump.pressurePoints.map((setting) => <ValueLine key={setting} label={`${Math.abs(setting)} mmHg vakum`} value="3 bacaan arah naik · 3 bacaan arah turun" />)}
-          <ValueLine label="Daya hisap maksimum" value={`Tekanan vakum ≥ ${instrument.suctionPump.minimumVacuumMmHg} mmHg · waktu ≤ 10 detik`} />
+          {instrument.suctionPump.pressurePoints.map((setting) => <ValueLine key={setting} label={`${Math.abs(setting)} mmHg vakum`} value="6 bacaan arah naik · 6 bacaan arah turun" />)}
+          <ValueLine label="Daya hisap maksimum" value={`Tekanan vakum ${instrument.suctionPump.minimumVacuumMmHg}–${instrument.suctionPump.maximumVacuumMmHg} mmHg · waktu ≤ 10 detik`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
           <FormulaStep number="1" title="Tanda bacaan" equation="x̄ = −rata-rata(bacaan DPM)" detail="Bacaan diisi tanpa tanda minus di form; aplikasi mengubahnya menjadi tekanan bertanda negatif seperti tabel scoring Excel." />
           <FormulaStep number="2" title="Koreksi regresi drift" equation="Naik: C = 0,2940837 + 0,003441824 × x̄; Turun: C = 0,3211573 + 0,003504638 × x̄" detail={`Koefisien mengikuti lembar DRIFT untuk DPM nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3]}.`} />
-          <FormulaStep number="3" title="Ketidakpastian" equation="U95 = t(0,975; νeff) × √Σui²" detail="Komponen: resolusi DPM 20 mmHg, simpangan baku tiga bacaan, drift sesuai setting/arah, dan U95 sertifikat DPM maksimum 0,31 mmHg; dibagi reliabilitas workbook." />
+          <FormulaStep number="3" title="Ketidakpastian" equation="UA = s / √n; U95 = t(0,975; νeff) × √Σui²" detail="Komponen: resolusi DPM 20 mmHg, simpangan baku enam bacaan, drift sesuai setting/arah, dan U95 sertifikat DPM maksimum 0,31 mmHg; dibagi reliabilitas workbook." />
           <FormulaStep number="4" title="Keputusan" equation="Galat = x̄ + C − setting; lulus jika |Galat / setting| ≤ 10%" detail="Workbook menghitung U95 untuk dilaporkan, tetapi kriteria lulus tekanan memakai persentase galat tanpa menambahkan U95." />
         </View>
         <View style={styles.formulaGroup}>
@@ -124,7 +129,7 @@ function FormulaCard({
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik ukur laju aliran</Text>
           {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value="6 bacaan · toleransi 10%" />)}
-          <ValueLine label="Occlusion" value="Setting 100 mL/h · 6 bacaan · batas rata-rata ≤ 20 psi" />
+          <ValueLine label="Occlusion" value={`Setting 100 mL/h · 6 bacaan · batas rata-rata ≤ ${occlusionLimit} psi`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi analyzer dan ketidakpastian</Text>
@@ -139,7 +144,7 @@ function FormulaCard({
           })}
           <FormulaStep number="2" title="U95 tiap titik" equation="uc = √[(0,01/√3)² + (s/√3)² + (drift/√3)² + (U95 standar/2)²]; U95 = t × uc" detail="Drift dan U95 standar diinterpolasi dari tabel workbook pada setting uji. Derajat bebas efektif mengikuti reliabilitas 50, 2, 50, 50." />
           <FormulaStep number="3" title="Keputusan laju aliran" equation="Galat = x̄corr − setting; lulus jika |Galat / setting| ≤ 10%" detail="U95 ditampilkan di hasil dan laporan. Rumus skor Excel menentukan lulus dari persentase galat terhadap setting." />
-          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail="Kriteria occlusion workbook membandingkan rata-rata enam bacaan mentah dengan batas 20 psi." />
+          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail={instrument.id === 'syringe-pump' ? 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 21 psi dari MK-24; Excel memakai 20 psi.' : 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 20 psi.'} />
           <ValueLine label="Bobot skor" value="Keselamatan listrik 40 · fisik/fungsi 10 · kinerja 50 (nilai blok flow + occlusion minimal 170%)" />
         </View>
       </> : instrument.sphygmomanometer ? <>
@@ -210,7 +215,7 @@ function FormulaCard({
               <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
               <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
               <FormulaStep number="4" title="Ketidakpastian bentangan 95%" equation="U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]" detail="Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan." />
-              <FormulaStep number="5" title="Batas toleransi" equation={`MPE = setting × ${row.tolerancePercent}%; lulus jika ${formula.acceptance}`} detail="MPE adalah batas kesalahan maksimum yang diizinkan pada titik uji." />
+              <FormulaStep number="5" title="Batas toleransi" equation={`MPE = setting × ${row.tolerancePercent}%; lulus jika ${formula.acceptance}`} detail={row.formula === 'flowmeter' ? 'MK-24 menetapkan ±20%, sedangkan Excel menghitung 10%. Aplikasi mengikuti metode MK-24.' : 'MPE adalah batas kesalahan maksimum yang diizinkan pada titik uji.'} />
             </View>;
           })}
         </View>
@@ -253,6 +258,7 @@ export function FormulasScreen() {
   return <ScreenPage title="Rumus" backLabel={record ? 'Pengerjaan' : 'Menu utama'} hint={record && activeInstrument ? `Rumus ${activeInstrument.name} dan alat lain bisa dibuka di bawah. Nilai acuan pekerjaan ada di rumus alat terkait.` : 'Pilih alat untuk melihat titik uji, urutan hitung, nilai acuan, dan batas lulusnya.'}>
     <Card>
       <Heading title="Kondisi lingkungan" hint="Suhu dan kelembapan ruangan dihitung terpisah memakai koreksi thermohygrometer acuan." />
+      <Badge text="Excel + sertifikat thermohygrometer" />
       <FormulaStep number="1" title="Cari koreksi dari sertifikat" equation="C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)" detail="Interpolasi di antara dua titik sertifikat yang mengapit bacaan." />
       <FormulaStep number="2" title="Koreksi bacaan awal dan akhir" equation="Nilai terkoreksi = bacaan + C(bacaan)" detail="Koreksi awal dan akhir dicari masing-masing dari tabel sertifikat." />
       <FormulaStep number="3" title="Ringkas kondisi ruangan" equation="Rata-rata = (awal terkoreksi + akhir terkoreksi) / 2; rentang = |awal − akhir|" detail="Rata-rata terkoreksi dicatat sebagai hasil suhu atau kelembapan ruangan." />
