@@ -257,7 +257,8 @@ function calculateEnvironment(data: CalibrationData): EnvironmentResult {
   return { reference, temperature, humidity, errors };
 }
 
-function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementReferences): CalculatedPerformance | null {
+function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementReferences, allRows: PerformanceEntry[]): CalculatedPerformance | null {
+  if (row.formula.startsWith('workbook')) return calculateWorkbookPerformanceRow(row, references, allRows);
   const setting = number(row.setting);
   const parsedReadings = row.readings.map(number);
   const referenceValues = [references.calibratorResolution, references.calibratorUncertainty, references.uutResolution].map(number);
@@ -297,6 +298,104 @@ function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementR
     testValue,
     pass: testValue <= tolerance,
     readings,
+  };
+}
+
+function calculateWorkbookPerformanceRow(row: PerformanceEntry, defaults: MeasurementReferences, allRows: PerformanceEntry[]): CalculatedPerformance | null {
+  const formula = row.formula;
+  const setting = number(row.setting);
+  if (formula === 'workbookRange') {
+    const sources = (row.sourceIds ?? []).map((id) => allRows.find((item) => item.id === id));
+    const values = sources.flatMap((source) => source
+      ? [...source.readings, ...(source.pairedReadings ?? [])].map(number)
+      : []);
+    const tolerance = number(row.absoluteTolerance);
+    if (setting === null || sources.length === 0 || sources.some((source) => !source || source.readings.length !== source.count
+      || source.readings.some((value) => number(value) === null)
+      || source.formula === 'workbookPairedAccuracy' && (!source.pairedReadings || source.pairedReadings.length !== source.count
+        || source.pairedReadings.some((value) => number(value) === null)))
+      || values.length === 0 || values.some((value) => value === null) || tolerance === null) return null;
+    const numericValues = values as number[];
+    const range = Math.max(...numericValues) - Math.min(...numericValues);
+    return { setting, mean: range, correction: range, ua: 0, u95: 0, tolerance, testValue: range, pass: range <= tolerance, readings: numericValues };
+  }
+  const readings = row.readings.map(number);
+  const standardReadings = row.standardReadings?.map(number);
+  const pairedReadings = row.pairedReadings?.map(number);
+  const isComparison = formula === 'workbookComparisonAccuracy';
+  const isPaired = formula === 'workbookPairedAccuracy';
+  const referenceValues = [row.references ?? defaults].flatMap((reference) => [
+    reference.calibratorResolution, reference.calibratorUncertainty, reference.uutResolution,
+  ]).map(number);
+  if (setting === null || row.count < 1 || row.readings.length !== row.count
+    || readings.some((value) => value === null)) return null;
+  if (isComparison && (!standardReadings || standardReadings.length !== row.count || standardReadings.some((value) => value === null))) return null;
+  if (isPaired && (!pairedReadings || pairedReadings.length !== row.count || pairedReadings.some((value) => value === null))) return null;
+
+  const minimum = number(row.minimumSetting);
+  const maximum = number(row.maximumSetting);
+  if (formula === 'workbookBand' && (minimum === null || maximum === null || minimum > maximum)) return null;
+  const useUncertainty = row.includeUncertainty !== false;
+  const parsedReferences = referenceValues.filter((value): value is number => value !== null);
+  if (useUncertainty && (parsedReferences.length !== 3 || parsedReferences[0] <= 0 || parsedReferences[1] < 0 || parsedReferences[2] <= 0)) return null;
+
+  const primaryReadings = readings as number[];
+  const pairedValues = pairedReadings as number[] | undefined;
+  const samples = isPaired ? primaryReadings.map((value, index) => (value + pairedValues![index]) / 2) : primaryReadings;
+  const mean = average(samples);
+  const ua = samples.length > 1 ? sampleStandardDeviation(samples) / Math.sqrt(samples.length) : 0;
+  const uncertaintyFor = (repeatability: number): number => {
+    if (!useUncertainty) return 0;
+    const [calibratorResolution, calibratorUncertainty, uutResolution] = parsedReferences;
+    const components = [
+      repeatability,
+      calibratorUncertainty / 2,
+      (uutResolution / 2) / Math.sqrt(3),
+      (calibratorResolution / 2) / Math.sqrt(3),
+    ];
+    return Math.sqrt(components.reduce((sum, component) => sum + component ** 2, 0)) * 2;
+  };
+  const u95 = uncertaintyFor(ua);
+  const correction = mean - setting;
+  const configuredTolerance = row.toleranceBySetting?.find((item) => Number(item.setting) === setting);
+  const absoluteTolerance = number(configuredTolerance?.tolerance ?? row.absoluteTolerance) ?? 0;
+  const tolerancePercent = number(row.tolerancePercent) ?? 0;
+  const tolerance = formula === 'workbookMinimum' || formula === 'workbookMaximum'
+    ? setting
+    : formula === 'workbookBand'
+      ? (maximum! - minimum!) / 2
+      : Math.max(absoluteTolerance, Math.abs(setting) * tolerancePercent / 100);
+  let testValue = row.uncertaintyRule === 'signed' ? Math.abs(correction + u95) : Math.abs(correction) + u95;
+  let pass = testValue <= tolerance;
+  if (formula === 'workbookMinimum') {
+    testValue = mean - u95;
+    pass = testValue >= setting;
+  } else if (formula === 'workbookMaximum') {
+    testValue = mean + u95;
+    pass = testValue <= setting;
+  } else if (formula === 'workbookBand') {
+    testValue = mean;
+    pass = mean - u95 >= minimum! && mean + u95 <= maximum!;
+  }
+
+  let standardMean: number | undefined;
+  let standardU95: number | undefined;
+  let standardPass: boolean | undefined;
+  let uutPass: boolean | undefined;
+  if (isComparison) {
+    const standardValues = standardReadings as number[];
+    standardMean = average(standardValues);
+    const standardUa = standardValues.length > 1 ? sampleStandardDeviation(standardValues) / Math.sqrt(standardValues.length) : 0;
+    standardU95 = uncertaintyFor(standardUa);
+    uutPass = pass;
+    standardPass = (row.uncertaintyRule === 'signed'
+      ? Math.abs(standardMean - setting + standardU95)
+      : Math.abs(standardMean - setting) + standardU95) <= tolerance;
+    pass = pass && standardPass;
+  }
+  return {
+    setting, mean, correction, ua, u95, tolerance, testValue, pass,
+    readings: primaryReadings, ...(standardMean === undefined ? {} : { standardMean, standardU95, standardPass, uutPass }),
   };
 }
 
@@ -476,7 +575,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     ...row,
     result: row.formula === 'infusionFlow'
       ? pumpAnalyzerValid ? calculatePumpFlow(row, data.infusionPump?.channel ?? '') : null
-      : calculatePerformanceRow(row, data.references),
+      : calculatePerformanceRow(row, data.references, data.performance),
   }));
   const infusionPump = templateId === 'infusion-pump' || templateId === 'syringe-pump';
   const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump, templateId === 'syringe-pump' ? 21 : 20) : null;
@@ -497,11 +596,16 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const physicalScore = inspectionRate === null
     ? null
     : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
-  const safety = ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId) ? calculateSafety(data.safety) : null;
+  const safety = instrument.electricalSafety || ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId) ? calculateSafety(data.safety) : null;
   const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete
     : suctionPump ? suctionPump.complete
       : infusionPump ? performance.length > 0 && performance.every((row) => row.result !== null) && pumpOcclusion !== null
         : performance.length > 0 && performance.every((row) => row.result !== null);
+  const scoredPerformance = performance.filter((row) => row.includeInScore !== false);
+  const performanceOutcomeCount = scoredPerformance.reduce((sum, row) => sum + (row.result ? 1 + Number(row.result.standardPass !== undefined) : 0), 0);
+  const performancePassCount = scoredPerformance.reduce((sum, row) => sum + (row.result
+    ? row.result.standardPass === undefined ? Number(row.result.pass) : Number(row.result.uutPass) + Number(row.result.standardPass)
+    : 0), 0);
   const performanceRate = weighing
     ? weighing.pass === null ? null : weighing.pass ? 100 : 0
     : sphygmomanometer
@@ -515,7 +619,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
         ? performanceComplete ? ((performance.filter((row) => row.result?.pass).length / performance.length) * 100 + Number(pumpOcclusion?.pass) * 100) / 2 : null
       : suctionPump
         ? performanceComplete ? (suctionPump.pressureReadings.reduce((sum, point) => sum + Number(point.up?.pass) + Number(point.down?.pass), 0) / (suctionPump.pressureReadings.length * 2)) * 100 : null
-    : performanceComplete ? (performance.filter((row) => row.result?.pass === true).length / performance.length) * 100 : null;
+    : performanceComplete && performanceOutcomeCount > 0 ? (performancePassCount / performanceOutcomeCount) * 100 : null;
   const performanceScore = weighing
     ? weighing.pass === null ? null : weighing.pass ? instrument.score.performanceWeight : 0
     : sphygmomanometer
@@ -524,7 +628,8 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       ? performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0
     : suctionPump
       ? performanceComplete ? performanceRate === 100 && suctionPump.maximumVacuumPass ? instrument.score.performanceWeight : 0 : null
-    : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
+    : instrument.score.performanceWeight === 0 ? performanceComplete ? 0 : null
+      : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
   const safetyScore = safety ? safety.score : 0;
   const score = physicalScore !== null && performanceScore !== null && safetyScore !== null
     ? physicalScore + performanceScore + safetyScore

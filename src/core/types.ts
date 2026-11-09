@@ -1,4 +1,7 @@
-export type PerformanceFormula = 'centrifugeSpeed' | 'centrifugeTime' | 'fetalHeartRate' | 'flowmeter' | 'infusionFlow';
+export type PerformanceFormula =
+  | 'centrifugeSpeed' | 'centrifugeTime' | 'fetalHeartRate' | 'flowmeter' | 'infusionFlow'
+  | 'workbookAccuracy' | 'workbookMinimum' | 'workbookMaximum' | 'workbookBand'
+  | 'workbookPairedAccuracy' | 'workbookComparisonAccuracy' | 'workbookRange';
 export type InspectionChoice = '' | 'Baik' | 'Tidak baik';
 export type DocumentKind = 'report' | 'certificate';
 
@@ -105,6 +108,15 @@ export interface PerformanceSetting {
   count: number;
   tolerancePercent: string;
   formula: PerformanceFormula;
+  absoluteTolerance?: string;
+  minimumSetting?: string;
+  maximumSetting?: string;
+  toleranceBySetting?: { setting: string; tolerance: string }[];
+  references?: MeasurementReferences;
+  includeUncertainty?: boolean;
+  includeInScore?: boolean;
+  uncertaintyRule?: 'signed' | 'absolute';
+  sourceIds?: string[];
 }
 
 export type Standard = [name: string, brand: string, model: string, serial: string];
@@ -119,6 +131,7 @@ export interface Instrument {
   performanceRows: PerformanceSetting[];
   references: MeasurementReferences;
   score: InstrumentScore;
+  electricalSafety?: boolean;
   weighingScale?: WeighingScaleConfig;
   sphygmomanometer?: SphygmomanometerConfig;
   suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number; maximumVacuumMmHg: number };
@@ -171,6 +184,8 @@ export interface InspectionEntry {
 
 export interface PerformanceEntry extends PerformanceSetting {
   readings: string[];
+  standardReadings?: string[];
+  pairedReadings?: string[];
 }
 
 export interface WeighingPointInput {
@@ -269,6 +284,10 @@ export interface CalculatedPerformance {
   readings: number[];
   correctedMean?: number;
   error?: number;
+  standardMean?: number;
+  standardU95?: number;
+  standardPass?: boolean;
+  uutPass?: boolean;
 }
 
 export interface PumpOcclusionResult {

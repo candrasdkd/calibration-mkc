@@ -7,7 +7,7 @@ import { getInstrumentTemplateId, getRecordInstrument, instruments } from '../..
 import { useRecords } from '../../work-orders/hooks/useRecords';
 import { styles } from '../styles/FormulasScreenStyles';
 
-import type { MeasurementReferences, PerformanceFormula } from '../../../core/types';
+import type { MeasurementReferences, PerformanceFormula, PerformanceSetting } from '../../../core/types';
 import type { FormulaDisplay } from '../types/FormulaDisplay';
 
 const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
@@ -16,7 +16,28 @@ const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
   fetalHeartRate: { title: 'Heart rate', correction: 'C = |x̄| − |setting|', repeatability: 'UA = s / √n', acceptance: '|C| + U95 ≤ 5 BPM' },
   flowmeter: { title: 'Laju aliran', correction: 'C = |setting| − |x̄|', repeatability: 'UA = s / √n', acceptance: '|C| + U95 ≤ 20% × setting' },
   infusionFlow: { title: 'Laju aliran pompa', correction: 'C = interceptChannel + slopeChannel × x̄; x̄corr = x̄ + C', repeatability: 'UA = s / √3', acceptance: '|x̄corr − setting| / setting ≤ 10%' },
+  workbookAccuracy: { title: 'Akurasi terhadap setting Excel', correction: 'C = x̄ − setting', repeatability: 'UA = s / √n', acceptance: '|C| + U95 ≤ toleransi Excel' },
+  workbookMinimum: { title: 'Batas minimum Excel', correction: 'Batas keputusan = x̄ − U95', repeatability: 'UA = s / √n', acceptance: 'x̄ − U95 ≥ batas minimum' },
+  workbookMaximum: { title: 'Batas maksimum Excel', correction: 'Batas keputusan = x̄ + U95', repeatability: 'UA = s / √n', acceptance: 'x̄ + U95 ≤ batas maksimum' },
+  workbookBand: { title: 'Rentang Excel', correction: 'Cek x̄ di antara batas bawah dan batas atas', repeatability: 'Satu bacaan sesuai lembar Excel', acceptance: 'batas bawah ≤ x̄ ≤ batas atas' },
+  workbookPairedAccuracy: { title: 'Rata-rata pasangan minimum/maksimum', correction: 'xi = (min_i + maks_i) / 2; C = x̄pasangan − setting', repeatability: 'UA = s pasangan / √n', acceptance: '|C| + U95 ≤ toleransi Excel' },
+  workbookComparisonAccuracy: { title: 'Perbandingan UUT dan standar', correction: 'CUUT = x̄UUT − setting; Cstd = x̄std − setting', repeatability: 'UA dihitung terpisah untuk UUT dan standar', acceptance: 'Keduanya memenuhi toleransi Excel' },
+  workbookRange: { title: 'Variasi rentang pengukuran', correction: 'R = nilai maksimum − nilai minimum', repeatability: 'Rentang seluruh bacaan min/maks', acceptance: 'R ≤ batas variasi Excel' },
 };
+
+function performanceAcceptance(row: PerformanceSetting) {
+  if (row.formula === 'workbookMinimum') return `${row.includeUncertainty === false ? 'x̄' : 'x̄ − U95'} ≥ ${row.setting} ${row.unit}`;
+  if (row.formula === 'workbookMaximum') return `${row.includeUncertainty === false ? 'x̄' : 'x̄ + U95'} ≤ ${row.setting} ${row.unit}`;
+  if (row.formula === 'workbookBand') return `${row.minimumSetting} ≤ x̄ ≤ ${row.maximumSetting} ${row.unit}`;
+  if (row.formula === 'workbookRange') return `maks(bacaan) − min(bacaan) ≤ ${row.absoluteTolerance} ${row.unit}`;
+  const fixedTolerance = row.toleranceBySetting?.find((item) => Number(item.setting) === Number(row.setting))?.tolerance ?? row.absoluteTolerance;
+  const hasPercent = Number(row.tolerancePercent) > 0;
+  const tolerance = fixedTolerance && hasPercent
+    ? `maks(${row.tolerancePercent}% × setting, ${fixedTolerance} ${row.unit})`
+    : fixedTolerance ? `${fixedTolerance} ${row.unit}` : `${row.tolerancePercent}% × setting`;
+  const testValue = row.uncertaintyRule === 'signed' ? '|C + U95|' : '|C| + U95';
+  return `${testValue} ≤ ${tolerance}`;
+}
 
 const excelQuestions = [
   'Thermohygrometer: koreksi RH pada 50% untuk Thermohygro 4 tertulis +10,1%. Angka ini benar atau tanda koreksinya keliru?',
@@ -32,6 +53,15 @@ const excelQuestions = [
   'Suction Pump: MK-24 masih berupa draf dan menetapkan rentang 150–450 mmHg, sedangkan Excel memakai titik −200 sampai −600 mmHg dan batas hisap maksimum ≥300 mmHg. Aplikasi mengikuti rentang MK-24 untuk pekerjaan baru; pastikan acuan final sebelum hasil resmi.',
   'Suction Pump: Excel menghitung U95 tekanan, tetapi keputusan lulus memakai |galat / setting| ≤ 10% tanpa U95. U95 memang hanya untuk pelaporan?',
   'Suction Pump: Laporan Hasil menampilkan −4,5 di baris “Vacuum (mmHg)”, padahal nilainya terhubung ke waktu 4,5 detik dan batas ≤ 10 detik. Apakah satuan di workbook salah?',
+  'AED: rumus akurasi energi punya batas ±15%, tetapi uji energi maksimum 10 kali dan waktu pengisian tidak memiliki kriteria lulus yang konsisten di lembar Olah Data; keduanya belum dipakai sebagai penentu skor.',
+  'Anesthesia Ventilator: beberapa rumus kolom standar mengacu ke bacaan UUT, dan sebagian sel hasil kosong. Aplikasi menghitung seri UUT dan standar terpisah dari nilai yang terisi.',
+  'Autoclave: tab Data Mentah tertulis Inkubator/Centrifuge, sedangkan Olah Data bertajuk Autoclave dan memakai siklus 121/134 °C. Implementasi mengikuti tab Olah Data.',
+  'Baby Incubator: tab input tertulis Anesthesia Unit; tab Olah Data dipakai. Beberapa formula min/maks merujuk baris bergeser; aplikasi menghitung pasangan per sensor dan variasi max−min dari bacaan mentah.',
+  'Blanket Warmer: tab Data Mentah tertulis Blood Warmer, tiga baris Suhu T1 identik, dan hanya baris pertama yang masuk rumus skor. Implementasi menilai ketiganya tetapi skor memakai baris pertama.',
+  'Blood Bank Refrigerator: rumus pada beberapa baris T3–T5 tidak terisi lengkap; implementasi memakai pola pasangan minimum/maksimum yang tampak pada baris T1–T2.',
+  'Keselamatan listrik: workbook alat baru menampilkan batas arus bocor bagian diaplikasikan 5000 mA, sedangkan pemeriksaan bersama aplikasi memakai 50 mA. Konfirmasi satuan/acuan sebelum hasil keselamatan dipakai resmi.',
+  'Bedside Monitor dan Biosafety Cabinet: workbook memakai nomor seri yang sama untuk alat standar berbeda (3904012 dan EFG19BE02496). Konfirmasi nomor seri sebelum sertifikat standar dicantumkan.',
+  'Audiometeri: file yang dibagikan berisi pengujian Short Wave Diathermy dan rumus #REF!, jadi alat ini belum dimasukkan.',
 ];
 
 function FormulaStep({ number, title, equation, detail }: { number: string; title: string; equation: string; detail: string }) {
@@ -204,19 +234,24 @@ function FormulaCard({
       </> : <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik pemeriksaan</Text>
-          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value={`${row.count} bacaan · toleransi ${row.tolerancePercent}%`} />)}
+          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.label} · ${row.setting} ${row.unit}`} value={`${row.formula === 'workbookRange' ? 'otomatis' : `${row.count} bacaan`} · ${performanceAcceptance(row)}${row.includeInScore === false ? ' · di luar skor' : ''}`} />)}
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Urutan perhitungan</Text>
           {formulaRows.map((row, index) => {
             const formula = formulaDisplay[row.formula];
             return <View key={row.formula} style={styles.methodGroup}>
-              <Text style={styles.methodTitle}>{formula.title} · {row.count} bacaan</Text>
-              <FormulaStep number="1" title="Rata-rata dan simpangan baku" equation="x̄ = Σxi / n; s = √[Σ(xi − x̄)² / (n − 1)]" detail={`n adalah jumlah bacaan pada tiap titik (${row.count}).`} />
-              <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
-              <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
-              <FormulaStep number="4" title="Ketidakpastian bentangan 95%" equation="U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]" detail="Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan." />
-              <FormulaStep number="5" title="Batas toleransi" equation={`MPE = setting × ${row.tolerancePercent}%; lulus jika ${formula.acceptance}`} detail={row.formula === 'flowmeter' ? 'MK-24 menetapkan ±20%, sedangkan Excel menghitung 10%. Aplikasi mengikuti metode MK-24.' : 'MPE adalah batas kesalahan maksimum yang diizinkan pada titik uji.'} />
+              <Text style={styles.methodTitle}>{formula.title} · {row.formula === 'workbookRange' ? 'otomatis' : `${row.count} bacaan`}</Text>
+              {row.formula === 'workbookRange' ? <>
+                <FormulaStep number="1" title="Hitung variasi" equation="R = maksimum bacaan min/maks − minimum bacaan min/maks" detail="Nilainya diturunkan otomatis dari seluruh bacaan sensor yang sama." />
+                <FormulaStep number="2" title="Batas lulus" equation={performanceAcceptance(row)} detail="Batas variasi berbeda mengikuti suhu kontrol di workbook." />
+              </> : <>
+                <FormulaStep number="1" title="Rata-rata dan simpangan baku" equation={row.formula === 'workbookPairedAccuracy' ? 'xi = (bacaan minimum_i + bacaan maksimum_i) / 2; x̄ = Σxi / n' : row.formula === 'workbookComparisonAccuracy' ? 'x̄UUT = ΣUUT_i / n; x̄standar = Σstandar_i / n' : 'x̄ = Σxi / n; s = √[Σ(xi − x̄)² / (n − 1)]'} detail={`n adalah jumlah bacaan pada tiap titik (${row.count}).`} />
+                <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
+                <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
+                <FormulaStep number="4" title={row.includeUncertainty === false ? 'Keputusan tanpa U95' : 'Ketidakpastian bentangan 95%'} equation={row.includeUncertainty === false ? 'U95 tidak ditambahkan ke keputusan, sesuai kriteria pada Excel.' : 'U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]'} detail={row.includeUncertainty === false ? 'Excel membandingkan rata-rata langsung dengan batas.' : 'Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan.'} />
+                <FormulaStep number="5" title="Batas lulus" equation={performanceAcceptance(row)} detail={row.formula === 'workbookComparisonAccuracy' ? 'UUT dan standar dinilai terpisah; keduanya harus lulus.' : row.formula === 'workbookPairedAccuracy' ? 'Setiap bacaan minimum dipasangkan dengan bacaan maksimum pada nomor yang sama.' : 'Batas dan arah pengujian mengikuti rumus pada workbook.'} />
+              </>}
             </View>;
           })}
         </View>

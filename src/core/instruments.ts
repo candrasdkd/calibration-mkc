@@ -3,6 +3,8 @@ import type {
   CalibrationRecord,
   CustomEquipment,
   Instrument,
+  PerformanceFormula,
+  PerformanceSetting,
   Standard,
   Thermohygrometer,
   ThermohygrometerPoint,
@@ -10,6 +12,58 @@ import type {
 import { adultScaleDigital, adultScaleMechanical, adultScaleStandards } from './weighingScales';
 
 const readings = (count: number): string[] => Array.from({ length: count }, () => '');
+const workbookPoint = (
+  id: string,
+  label: string,
+  setting: string,
+  unit: string,
+  count: number,
+  tolerancePercent: string,
+  formula: PerformanceFormula = 'workbookAccuracy',
+  options: Partial<PerformanceSetting> = {},
+): PerformanceSetting => ({ id, label, setting, unit, count, tolerancePercent, formula, ...options });
+const oxygenFlowRows = (idPrefix: string, tolerance: string, references: Instrument['references'], includeInScore = true) => Array.from({ length: 10 }, (_, index) =>
+  workbookPoint(`${idPrefix}-${index + 1}`, 'Laju aliran gas oksigen', String(index + 1), 'L/min', 5, tolerance, 'workbookAccuracy', { references, includeInScore }));
+const ventilatorReferences = { calibratorResolution: '0.01', calibratorUncertainty: '0', uutResolution: '0.1' };
+const gasFlowReferences = { calibratorResolution: '0.1', calibratorUncertainty: '0.05', uutResolution: '0.1' };
+const ventilatorPerformanceRows: PerformanceSetting[] = [
+  ['m1-vt', 'Mode VT300/RR20/FiO₂30 · Volume tidal', '300', 'mL'],
+  ['m1-rate', 'Mode VT300/RR20/FiO₂30 · Breath rate', '20', 'bpm'],
+  ['m1-o2', 'Mode VT300/RR20/FiO₂30 · FiO₂', '30', '%'],
+  ['m1-peep', 'Mode VT300/RR20/FiO₂30 · PEEP', '5', 'cmH₂O'],
+  ['m1-pip', 'Mode VT300/RR20/FiO₂30 · PIP', '30', 'cmH₂O'],
+  ['m1-ti', 'Mode VT300/RR20/FiO₂30 · Ti', '0.5', 'detik'],
+  ['m2-vt', 'Mode VT400/RR15/FiO₂60 · Volume tidal', '400', 'mL'],
+  ['m2-rate', 'Mode VT400/RR15/FiO₂60 · Breath rate', '15', 'bpm'],
+  ['m2-o2', 'Mode VT400/RR15/FiO₂60 · FiO₂', '60', '%'],
+  ['m2-peep', 'Mode VT400/RR15/FiO₂60 · PEEP', '5', 'cmH₂O'],
+  ['m2-pip', 'Mode VT400/RR15/FiO₂60 · PIP', '20', 'cmH₂O'],
+  ['m2-ti', 'Mode VT400/RR15/FiO₂60 · Ti', '1', 'detik'],
+  ['m3-vt', 'Mode VT500/RR10/FiO₂90 · Volume tidal', '500', 'mL'],
+  ['m3-rate', 'Mode VT500/RR10/FiO₂90 · Breath rate', '10', 'bpm'],
+  ['m3-o2', 'Mode VT500/RR10/FiO₂90 · FiO₂', '90', '%'],
+  ['m3-peep', 'Mode VT500/RR10/FiO₂90 · PEEP', '5', 'cmH₂O'],
+  ['m3-pip', 'Mode VT500/RR10/FiO₂90 · PIP', '10', 'cmH₂O'],
+  ['m3-ti', 'Mode VT500/RR10/FiO₂90 · Ti', '1.5', 'detik'],
+  ['m4-vt', 'Mode VT300/RR20/FiO₂60 · Volume tidal', '300', 'mL'],
+  ['m4-rate', 'Mode VT300/RR20/FiO₂60 · Breath rate', '20', 'bpm'],
+  ['m4-o2', 'Mode VT300/RR20/FiO₂60 · FiO₂', '60', '%'],
+  ['m5-vt', 'Mode VT300/RR20/FiO₂90 · Volume tidal', '300', 'mL'],
+  ['m5-rate', 'Mode VT300/RR20/FiO₂90 · Breath rate', '20', 'bpm'],
+  ['m5-o2', 'Mode VT300/RR20/FiO₂90 · FiO₂', '90', '%'],
+].map(([id, label, setting, unit]) => workbookPoint(id, label, setting, unit, 5, '10', 'workbookComparisonAccuracy', { references: ventilatorReferences }));
+const incubatorTemperatureRows = (setting: string) => ['T1', 'T2', 'T3', 'T4', 'T5'].map((sensor) => workbookPoint(
+  `${setting}-${sensor.toLowerCase()}`, `Suhu udara ${setting} °C · ${sensor} min/maks`, setting, '°C', 6, '0', 'workbookPairedAccuracy',
+  { absoluteTolerance: '1.5', references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '0.1' } },
+));
+const incubatorVariationRows = (setting: string, tolerance: string) => ['T1', 'T2', 'T3', 'T4', 'T5'].map((sensor) => workbookPoint(
+  `${setting}-variation-${sensor.toLowerCase()}`, `Variasi suhu ${setting} °C · ${sensor}`, setting, '°C', 0, '0', 'workbookRange',
+  { absoluteTolerance: tolerance, sourceIds: [`${setting}-${sensor.toLowerCase()}`] },
+));
+const bedsideRows = (prefix: string, label: string, settings: number[], unit: string, tolerancePercent: string, absoluteTolerance?: string) => settings.map((setting) => workbookPoint(
+  `${prefix}-${setting}`, label, String(setting), unit, 6, tolerancePercent, 'workbookAccuracy',
+  { ...(absoluteTolerance ? { absoluteTolerance } : {}), references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' } },
+));
 const points = (values: [number, number][]): ThermohygrometerPoint[] => values.map(([value, correction]) => ({ value, correction }));
 const sphygmomanometerInspectionItems = [
   'Badan / permukaan', 'Balon tensi, tabung, dan selang', 'Bantalan / rem', 'Filter air raksa',
@@ -247,6 +301,254 @@ export const instruments: Instrument[] = [
       drift: sphygmomanometerDrift,
     },
   },
+  {
+    id: 'aed',
+    name: 'AED / Defibrillator',
+    subtitle: 'Akurasi energi keluaran pada delapan setting',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Defibrillator Analyzer', 'Gossen Metrawatt', 'TC-920', '73969912072'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [5, 10, 20, 30, 50, 100, 150, 200].map((setting) => workbookPoint(
+      `energy-${setting}`, 'Akurasi energi keluaran', String(setting), 'Joule', 3, '15', 'workbookAccuracy',
+      { references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' }, uncertaintyRule: 'signed' },
+    )),
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'aed-without-setting',
+    name: 'AED tanpa setting',
+    subtitle: 'Energi keluaran tetap · ambang minimum 110 Joule',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Defibrillator Analyzer', 'Gossen Metrawatt', 'TC-920', '73969912072'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [workbookPoint('fixed-energy', 'Energi keluaran tetap', '110', 'Joule', 3, '0', 'workbookMinimum', {
+      includeUncertainty: false,
+      references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' },
+    })],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'anesthesia-unit',
+    name: 'Anesthesia Unit',
+    subtitle: 'Laju aliran gas, oxygen flush, dan keselamatan listrik',
+    standards: [
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Gas Flow Analyzer', 'IMT Medical', 'PF-300', '2012BA104380'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Baterai', 'Selang pernapasan', 'Konektor gas', 'Back up catu daya', 'Alarm', 'Pelabelan dan aksesoris'],
+    performanceRows: [
+      ...oxygenFlowRows('gas-flow', '20', gasFlowReferences),
+      workbookPoint('oxygen-flush', 'Oxygen flush valve', '55', 'L/min', 1, '0', 'workbookBand', {
+        minimumSetting: '35', maximumSetting: '75', includeUncertainty: false, includeInScore: false,
+      }),
+    ],
+    references: gasFlowReferences,
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'anesthesia-ventilator',
+    name: 'Anesthesia Ventilator',
+    subtitle: 'Ventilator, aliran gas, oxygen flush, dan keselamatan listrik',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Gas Flow Analyzer', 'IMT Medical', 'PF-300', '2012BA104380'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Baterai', 'Selang pernapasan', 'Konektor gas', 'Back up catu daya', 'Alarm', 'Pelabelan dan aksesoris'],
+    performanceRows: [
+      ...ventilatorPerformanceRows,
+      ...oxygenFlowRows('oxygen-flow', '10', gasFlowReferences, false),
+      workbookPoint('oxygen-flush', 'Oxygen flush valve', '55', 'L/min', 1, '0', 'workbookBand', {
+        minimumSetting: '35', maximumSetting: '75', includeUncertainty: false, includeInScore: false,
+      }),
+    ],
+    references: ventilatorReferences,
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'anesthesia-ventilator-vaporizer',
+    name: 'Anesthesia Ventilator + Vaporizer',
+    subtitle: 'Ventilator dan konsentrasi Sevoflurane / Isoflurane',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Gas Flow Analyzer', 'IMT Medical', 'PF-300', '2012BA104380'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Vaporizer Analyzer Sevoflurane', 'HEYER', 'VP 300', 'VP300ES1XYZR00221'],
+      ['Vaporizer Analyzer Isoflurane', 'HEYER', 'VP 300', 'VP300EI1XYZR00255'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Baterai', 'Selang pernapasan', 'Konektor gas', 'Back up catu daya', 'Alarm', 'Pelabelan dan aksesoris'],
+    performanceRows: [
+      ...ventilatorPerformanceRows,
+      ...oxygenFlowRows('oxygen-flow', '10', gasFlowReferences, false),
+      workbookPoint('oxygen-flush', 'Oxygen flush valve', '55', 'L/min', 1, '0', 'workbookBand', {
+        minimumSetting: '35', maximumSetting: '75', includeUncertainty: false, includeInScore: false,
+      }),
+      ...(['Sevoflurane', 'Isoflurane'] as const).flatMap((gas) => [0, 0.5, 1, 3, 5].map((setting) => workbookPoint(
+        `${gas.toLowerCase()}-${setting}`, `${gas} · konsentrasi aliran udara 4 L/min`, String(setting), '%', 3, '0', 'workbookAccuracy', {
+          absoluteTolerance: setting === 0 ? '0.1' : '0.3',
+          references: { calibratorResolution: '0.1', calibratorUncertainty: '0.05', uutResolution: '0.1' },
+          includeInScore: false,
+        },
+      ))),
+    ],
+    references: ventilatorReferences,
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'autoclave-steam-sterilizer',
+    name: 'Autoclave (Steam Sterilizer)',
+    subtitle: 'Temperatur siklus pada tiga titik sensor',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Thermometer', 'Lutron', 'TC-920', 'I.479807'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kontak catu daya', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [121, 134].flatMap((setting) => ['T1', 'T2', 'T3'].map((sensor) => workbookPoint(
+      `temperature-${setting}-${sensor.toLowerCase()}`, `${sensor} · siklus ${setting} °C min/maks`, String(setting), '°C', 6, '0', 'workbookPairedAccuracy', {
+        absoluteTolerance: setting === 121 ? '2' : '3', uncertaintyRule: 'signed',
+        references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '0.1' },
+      },
+    ))),
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '0.1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'baby-incubator',
+    name: 'Baby Incubator',
+    subtitle: 'Suhu udara, kestabilan, waktu pemulihan, dan sensor kulit',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Incubator Analyzer', 'Fluke', 'Incu 1', '6050763'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Baterai', 'Alarm', 'Aksesoris dan sensor'],
+    performanceRows: [
+      ...incubatorTemperatureRows('32'),
+      ...incubatorVariationRows('32', '1.5'),
+      ...incubatorTemperatureRows('36'),
+      ...incubatorVariationRows('36', '0.8'),
+      workbookPoint('overshoot-32', 'Lonjakan suhu pada kontrol 32 °C', '2', '°C', 5, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('recovery-32', 'Waktu pemulihan setelah lonjakan 32 °C', '900', 'detik', 5, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('overshoot-36', 'Lonjakan suhu pada kontrol 36 °C', '2', '°C', 5, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('recovery-36', 'Waktu pemulihan setelah lonjakan 36 °C', '900', 'detik', 5, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('air-speed', 'Kecepatan udara pada 36 °C', '0.35', 'm/s', 6, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('mattress-temperature', 'Suhu matras pada 36 °C', '40', '°C', 6, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('noise', 'Kebisingan pada 36 °C', '60', 'dBA', 6, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('skin-temperature-control', 'Sensor kulit terhadap temperatur kontrol', '36', '°C', 6, '0', 'workbookAccuracy', { absoluteTolerance: '0.7' }),
+      workbookPoint('skin-temperature-baby-mode', 'Sensor kulit terhadap kulit / Baby Mode', '36', '°C', 6, '0', 'workbookAccuracy', { absoluteTolerance: '0.3' }),
+    ],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '0.1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'bedside-monitor',
+    name: 'Bedside Monitor',
+    subtitle: 'Heart rate, respirasi, SpO₂, dan NIBP',
+    standards: [
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Vital Sign Simulator', 'Fluke', 'Prosim 4 Vital Sign Simulator', '3904012'],
+      ['SpO₂ Simulator', 'Fluke', 'Prosim SPOT Light SpO₂', '3904012'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kabel catu utama', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Kabel aksesoris', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [
+      ...bedsideRows('heart-rate', 'Heart rate', [30, 60, 120, 180], 'bpm', '5', '5'),
+      ...bedsideRows('respiration', 'Respirasi', [10, 30, 60, 100], 'BrPM', '5', '5'),
+      ...bedsideRows('spo2', 'Saturasi oksigen', [85, 90, 95, 100], '% O₂', '1'),
+      ...bedsideRows('spo2-heart-rate', 'Heart rate melalui SpO₂', [60, 120, 180, 240], 'bpm', '1'),
+      ...([[60, 40, 30], [120, 93, 80], [150, 117, 100], [200, 167, 150]] as [number, number, number][]).flatMap(([systolic, mean, diastolic]) => [
+        workbookPoint(`nibp-systolic-${systolic}`, 'NIBP · Systole', String(systolic), 'mmHg', 6, '0', 'workbookAccuracy', { absoluteTolerance: '8', references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' } }),
+        workbookPoint(`nibp-mean-${systolic}`, 'NIBP · Mean', String(mean), 'mmHg', 6, '0', 'workbookAccuracy', { absoluteTolerance: '8', references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' } }),
+        workbookPoint(`nibp-diastolic-${systolic}`, 'NIBP · Diastole', String(diastolic), 'mmHg', 6, '0', 'workbookAccuracy', { absoluteTolerance: '8', references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' } }),
+      ]),
+    ],
+    references: { calibratorResolution: '1', calibratorUncertainty: '0', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'biosafety-cabinet',
+    name: 'Biosafety Cabinet',
+    subtitle: 'Particle counter, kecepatan aliran, cahaya, suara, dan UV',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+      ['Particle Counter', 'Extech Instrument', 'VPC 300', '170526242'],
+      ['Light Meter', 'Lutron', 'LM-8010', 'AL.89713'],
+      ['Sound Level Meter', 'Krisbow', '-', '-'],
+      ['Anemometer', 'Krisbow', 'KW06-053', '-'],
+      ['UV Radiometer', 'Lutron', 'UV-340A', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kontak catu daya', 'Remote', 'Hidrolik', 'Roda'],
+    performanceRows: [
+      workbookPoint('particle-counter', 'Particle Counter · partikel 0,5 μm', '100', 'partikel', 6, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('inflow-velocity', 'Inflow velocity', '0.53', 'm/s', 6, '0', 'workbookAccuracy', { absoluteTolerance: '0.025', includeUncertainty: false }),
+      workbookPoint('downflow-velocity', 'Downflow velocity', '0.35', 'm/s', 6, '0', 'workbookAccuracy', { absoluteTolerance: '0.025', includeUncertainty: false }),
+      workbookPoint('light-meter', 'Light meter', '750', 'lux', 6, '0', 'workbookMinimum', { includeUncertainty: false }),
+      workbookPoint('sound-level', 'Sound level meter', '55', 'dBA', 6, '0', 'workbookMaximum', { includeUncertainty: false }),
+      workbookPoint('uv-radiometer', 'Lampu UV', '40', 'μW/cm²', 6, '0', 'workbookMinimum', { includeUncertainty: false }),
+    ],
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0.05', uutResolution: '0.1' },
+    score: { performanceThreshold: 70, performanceWeight: 0, physicalWeight: 60 },
+    electricalSafety: true,
+  },
+  {
+    id: 'blanket-warmer',
+    name: 'Blanket Warmer',
+    subtitle: 'Suhu T1 pada tiga seri pengukuran',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Thermometer', 'Lutron', 'TC-920', 'I.479807'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', '73969912072'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kontak catu daya', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: [1, 2, 3].map((cycle) => workbookPoint(
+      `temperature-t1-${cycle}`, `Suhu T1 · pengukuran ${cycle}`, '38.5', '°C', 5, '10', 'workbookAccuracy', {
+        references: { calibratorResolution: '0.1', calibratorUncertainty: '0.02', uutResolution: '1' },
+        uncertaintyRule: 'signed', ...(cycle > 1 ? { includeInScore: false } : {}),
+      },
+    )),
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0.02', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
+  {
+    id: 'blood-bank-refrigerator',
+    name: 'Blood Bank Refrigerator',
+    subtitle: 'Suhu minimum dan maksimum pada lima sensor',
+    standards: [
+      ['Electrical Safety Analyzer', 'Gossen Metrawatt', 'Seculife ST Pro', 'FC7267170003'],
+      ['Thermometer Digital', 'Lutron', 'TC-920', 'I.479807'],
+      ['Thermohygrometer', 'Elitech', 'GSP-6', 'EFG19BE02496'],
+    ],
+    inspectionItems: ['Badan dan permukaan', 'Kotak kontak alat', 'Kontak catu daya', 'Sekering pengaman', 'Tombol, saklar dan kontrol', 'Tombol-tombol fungsi', 'Tampilan dan indikator'],
+    performanceRows: ['T1', 'T2', 'T3', 'T4', 'T5'].map((sensor) => workbookPoint(
+      `temperature-${sensor.toLowerCase()}`, `${sensor} suhu minimum/maksimum`, '4', '°C', 6, '25', 'workbookPairedAccuracy', {
+        absoluteTolerance: '1', uncertaintyRule: 'signed',
+        references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '1' },
+      },
+    )),
+    references: { calibratorResolution: '0.1', calibratorUncertainty: '0.01', uutResolution: '1' },
+    score: { performanceThreshold: 70, performanceWeight: 50, physicalWeight: 10 },
+    electricalSafety: true,
+  },
 ];
 
 export const getInstrument = (id: string): Instrument | undefined => instruments.find((instrument) => instrument.id === id);
@@ -289,7 +591,12 @@ export function createInitialData(instrumentId: string): CalibrationData {
     selectedDevices: [],
     references: { ...instrument.references },
     inspections: instrument.inspectionItems.map((label) => ({ label, physical: '', function: '', note: '' })),
-    performance: instrument.performanceRows.map((row) => ({ ...row, readings: readings(row.count) })),
+    performance: instrument.performanceRows.map((row) => ({
+      ...row,
+      readings: readings(row.count),
+      ...(row.formula === 'workbookComparisonAccuracy' ? { standardReadings: readings(row.count) } : {}),
+      ...(row.formula === 'workbookPairedAccuracy' ? { pairedReadings: readings(row.count) } : {}),
+    })),
     ...(instrument.weighingScale ? { weighing: {
       repeatabilityReadings: Array.from({ length: 10 }, () => ({ zeroReading: '', indication: '' })),
       points: instrument.weighingScale.points.map(({ id }) => ({ id, zeroReading: '', indication: '', standardWeights: [] })),

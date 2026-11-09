@@ -576,24 +576,47 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
       {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
       {data.performance.map((row, rowIndex) => {
         const calculated = result.performance[rowIndex].result;
+        const absoluteTolerance = Number(row.absoluteTolerance?.replace(',', '.') ?? 0);
+        const percentTolerance = Number(row.tolerancePercent.replace(',', '.') ?? 0);
+        const limitLabel = row.formula === 'workbookMinimum' ? `Batas minimum ≥ ${row.setting} ${row.unit}`
+          : row.formula === 'workbookMaximum' ? `Batas maksimum ≤ ${row.setting} ${row.unit}`
+            : row.formula === 'workbookBand' ? `Rentang ${row.minimumSetting}–${row.maximumSetting} ${row.unit}`
+              : row.formula === 'workbookRange' ? `Variasi maksimum ${row.absoluteTolerance} ${row.unit}`
+              : absoluteTolerance && percentTolerance ? `±${percentTolerance}% atau ${row.absoluteTolerance} ${row.unit}`
+                : absoluteTolerance ? `±${row.absoluteTolerance} ${row.unit}` : `±${row.tolerancePercent}%`;
+        const renderReadings = (values: string[], field: 'readings' | 'standardReadings' | 'pairedReadings', title: string) => <>
+          <Text style={styles.labelLike}>{title} · {values.length} kali sesuai Excel</Text>
+          <View style={styles.readingsGrid}>{values.map((value, readingIndex) => <View key={readingIndex} style={styles.readingCell}>
+            <Text style={styles.readingLabel}>Bacaan {readingIndex + 1}</Text>
+            <TextInput accessibilityLabel={`${row.label}, ${title}, bacaan ${readingIndex + 1}`} value={value} onChangeText={(next) => updatePerformance(rowIndex, field, next, readingIndex)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
+          </View>)}</View>
+        </>;
         return <View key={row.id} style={styles.performanceCard}>
           <View style={styles.performanceHeading}>
             <Text style={styles.itemTitle}>{row.label} · {row.unit}</Text>
             {calculated ? <Badge text={calculated.pass ? 'LULUS' : 'TIDAK LULUS'} tone={calculated.pass ? 'good' : 'bad'} /> : <Badge text="MENUNGGU" tone="wait" />}
           </View>
           <View style={styles.settingRow}>
-            <View style={styles.settingField}><Field label="Setting" value={row.setting} onChange={(value) => updatePerformance(rowIndex, 'setting', value)} keyboard="decimal-pad" suffix={row.unit} /></View>
-            <Text style={styles.toleranceNote}>Toleransi {row.formula === 'fetalHeartRate' ? '±5 BPM' : `±${row.formula === 'flowmeter' ? '20' : row.tolerancePercent}%`}</Text>
+            <View style={styles.settingField}><Field label={row.formula === 'workbookMinimum' ? 'Batas minimum' : row.formula === 'workbookMaximum' ? 'Batas maksimum' : row.formula === 'workbookBand' ? 'Titik tengah' : row.formula === 'workbookRange' ? 'Suhu kontrol' : 'Setting'} value={row.setting} onChange={(value) => updatePerformance(rowIndex, 'setting', value)} keyboard="decimal-pad" suffix={row.unit} editable={row.formula !== 'workbookBand' && row.formula !== 'workbookRange'} /></View>
+            <Text style={styles.toleranceNote}>{limitLabel}</Text>
           </View>
-          <Text style={styles.labelLike}>Bacaan terukur · {row.readings.length} kali sesuai Excel</Text>
-          <Text style={styles.readingsHint}>Ketuk setiap kolom untuk memasukkan atau mengubah angka bacaan.</Text>
-          <View style={styles.readingsGrid}>
-            {row.readings.map((value, readingIndex) => <View key={readingIndex} style={styles.readingCell}>
-              <Text style={styles.readingLabel}>Bacaan {readingIndex + 1}</Text>
-              <TextInput accessibilityLabel={`${row.label}, bacaan ${readingIndex + 1}`} value={value} onChangeText={(next) => updatePerformance(rowIndex, 'readings', next, readingIndex)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
-            </View>)}
-          </View>
-          {calculated ? <View style={styles.inlineStats}><Text style={styles.inlineStat}>Rata-rata {fmt(calculated.mean)}</Text><Text style={styles.inlineStat}>Koreksi standar {fmt(calculated.correction)}</Text>{calculated.correctedMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(calculated.correctedMean)}</Text> : null}{calculated.error !== undefined ? <Text style={styles.inlineStat}>Galat {fmt(calculated.error)} · {fmt(calculated.testValue * 100, 2)}%</Text> : null}<Text style={styles.inlineStat}>U95 {fmt(calculated.u95)}</Text></View> : null}
+          {row.formula === 'workbookRange' ? <Text style={styles.readingsHint}>Rentang dihitung otomatis dari bacaan minimum dan maksimum sensor terkait.</Text> : <Text style={styles.readingsHint}>Ketuk setiap kolom untuk memasukkan atau mengubah angka bacaan.</Text>}
+          {row.includeInScore === false ? <Text style={styles.readingsHint}>Dicatat di lembar hasil, tetapi tidak masuk skor Excel.</Text> : null}
+          {row.formula === 'workbookComparisonAccuracy' ? <>
+            {renderReadings(row.readings, 'readings', 'Bacaan UUT')}
+            {renderReadings(row.standardReadings ?? [], 'standardReadings', 'Bacaan standar')}
+          </> : row.formula === 'workbookPairedAccuracy' ? <>
+            {renderReadings(row.readings, 'readings', 'Bacaan minimum')}
+            {renderReadings(row.pairedReadings ?? [], 'pairedReadings', 'Bacaan maksimum')}
+          </> : row.formula === 'workbookRange' ? null : renderReadings(row.readings, 'readings', 'Bacaan terukur')}
+          {calculated ? <View style={styles.inlineStats}>
+            <Text style={styles.inlineStat}>{row.formula === 'workbookRange' ? `Rentang max − min ${fmt(calculated.testValue)} ${row.unit}` : `Rata-rata ${fmt(calculated.mean)}`}</Text>
+            {calculated.standardMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata standar {fmt(calculated.standardMean)} · U95 {fmt(calculated.standardU95)}</Text> : null}
+            {calculated.correction !== null && row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>Koreksi {fmt(calculated.correction)}</Text> : null}
+            {calculated.correctedMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(calculated.correctedMean)}</Text> : null}
+            {calculated.error !== undefined ? <Text style={styles.inlineStat}>Galat {fmt(calculated.error)} · {fmt(calculated.testValue * 100, 2)}%</Text> : null}
+            {row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>{row.includeUncertainty === false ? 'Ketidakpastian tidak dipakai untuk keputusan Excel' : `U95 ${fmt(calculated.u95)}`}</Text> : null}
+          </View> : null}
         </View>;
       })}
     </Card>}
@@ -736,10 +759,12 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
       </Card>
     </> : <Card><Heading title="Hasil tiap titik kinerja" />
       {result.performance.map((row) => <View key={row.id} style={styles.resultPerformance}>
-        <View style={styles.resultLine}><Text style={styles.resultLabel}>{row.setting} {row.unit}</Text><Badge text={row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : 'KOSONG'} tone={row.result ? row.result.pass ? 'good' : 'bad' : 'wait'} /></View>
-        <ValueLine label="Rata-rata" value={row.result ? fmt(row.result.mean) : '—'} />
-        <ValueLine label="Koreksi" value={row.result ? fmt(row.result.correction) : '—'} />
-        <ValueLine label="Koreksi + U95 / toleransi" value={row.result ? `${fmt(row.result.testValue)} / ${fmt(row.result.tolerance)}` : '—'} />
+        <View style={styles.resultLine}><Text style={styles.resultLabel}>{row.label} · {row.setting} {row.unit}</Text><Badge text={row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : 'KOSONG'} tone={row.result ? row.result.pass ? 'good' : 'bad' : 'wait'} /></View>
+        <ValueLine label={row.formula === 'workbookComparisonAccuracy' ? 'Rata-rata UUT' : row.formula === 'workbookRange' ? 'Rentang max − min' : 'Rata-rata'} value={row.result ? fmt(row.formula === 'workbookRange' ? row.result.testValue : row.result.mean) : '—'} />
+        {row.result?.standardMean !== undefined ? <ValueLine label="Rata-rata standar" value={fmt(row.result.standardMean)} /> : null}
+        {row.formula !== 'workbookRange' ? <ValueLine label="Koreksi" value={row.result ? fmt(row.result.correction) : '—'} /> : null}
+        {row.result?.standardMean !== undefined ? <ValueLine label="Status standar" value={row.result.standardPass ? 'Lulus' : 'Tidak lulus'} /> : null}
+        <ValueLine label={row.formula === 'workbookRange' ? 'Rentang max − min / toleransi' : row.formula === 'workbookMinimum' || row.formula === 'workbookMaximum' ? 'Nilai keputusan / batas' : row.formula === 'workbookBand' ? 'Bacaan / rentang lulus' : row.includeUncertainty === false ? 'Galat / toleransi' : 'Koreksi + U95 / toleransi'} value={row.result ? row.formula === 'workbookBand' ? `${fmt(row.result.mean)} / ${row.minimumSetting}–${row.maximumSetting} ${row.unit}` : `${fmt(row.result.testValue)} / ${fmt(row.result.tolerance)}` : '—'} />
       </View>)}
     </Card>}
   </>;
@@ -838,9 +863,10 @@ export default function CalibrationScreen() {
   const updatePerformance: PerformanceUpdate = (index, key, value, readingIndex) => {
     const performance = data.performance.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
-      if (key === 'readings') {
+      if (key !== 'setting') {
         if (readingIndex === undefined) return row;
-        return { ...row, readings: row.readings.map((item, itemIndex) => itemIndex === readingIndex ? value : item) };
+        const readings = (row[key] ?? []).map((item, itemIndex) => itemIndex === readingIndex ? value : item);
+        return { ...row, [key]: readings };
       }
       return { ...row, setting: value };
     });

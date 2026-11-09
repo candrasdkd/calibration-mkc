@@ -43,6 +43,19 @@ const demoDirectory: AdminDirectory = {
         conventionalMass2025G: String(weight.conventionalMass2025G), conventionalMass2026G: String(weight.conventionalMass2026G),
       }, isDemo: true,
     })),
+    { id: 'demo-device-extra-defib', name: 'Defibrillator Analyzer', brand: 'Gossen Metrawatt', model: 'TC-920', serial: '73969912072', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-thermometer', name: 'Thermometer', brand: 'Lutron', model: 'TC-920', serial: 'I.479807', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-thermometer-digital', name: 'Thermometer Digital', brand: 'Lutron', model: 'TC-920', serial: 'I.479807', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-incubator', name: 'Incubator Analyzer', brand: 'Fluke', model: 'Incu 1', serial: '6050763', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-vital-sign', name: 'Vital Sign Simulator', brand: 'Fluke', model: 'Prosim 4 Vital Sign Simulator', serial: '3904012', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-spo2', name: 'SpO₂ Simulator', brand: 'Fluke', model: 'Prosim SPOT Light SpO₂', serial: '3904012', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-vapor-sevo', name: 'Vaporizer Analyzer Sevoflurane', brand: 'HEYER', model: 'VP 300', serial: 'VP300ES1XYZR00221', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-vapor-iso', name: 'Vaporizer Analyzer Isoflurane', brand: 'HEYER', model: 'VP 300', serial: 'VP300EI1XYZR00255', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-particle', name: 'Particle Counter', brand: 'Extech Instrument', model: 'VPC 300', serial: '170526242', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-light', name: 'Light Meter', brand: 'Lutron', model: 'LM-8010', serial: 'AL.89713', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-sound', name: 'Sound Level Meter', brand: 'Krisbow', model: '-', serial: '-', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-anemometer', name: 'Anemometer', brand: 'Krisbow', model: 'KW06-053', serial: '-', isThermohygrometer: false, certificate: null, isDemo: true },
+    { id: 'demo-device-extra-uv', name: 'UV Radiometer', brand: 'Lutron', model: 'UV-340A', serial: 'EFG19BE02496', isThermohygrometer: false, certificate: null, isDemo: true },
   ],
   technicians: [
     { id: 'demo-technician-1', name: 'Dina Teknisi Demo', phone: '0812-0000-0011', isDemo: true },
@@ -50,7 +63,7 @@ const demoDirectory: AdminDirectory = {
   ],
   equipmentMethods: [],
   customEquipment: [],
-  seedVersion: 6,
+  seedVersion: 7,
 };
 
 export type AdminDataContextValue = AdminDirectory & {
@@ -119,6 +132,13 @@ function parseDirectory(value: unknown): AdminDirectory {
       if (!devices.some((item) => item.id === demoDevice.id || item.serial === demoDevice.serial)) devices.push(demoDevice);
     }
   }
+  if (!directory.seedVersion || directory.seedVersion < 7) {
+    for (const demoDevice of demoDirectory.devices.filter((item) => item.id.startsWith('demo-device-extra-'))) {
+      const exists = devices.some((item) => item.id === demoDevice.id
+        || item.name.trim().toLowerCase() === demoDevice.name.toLowerCase() && item.serial === demoDevice.serial);
+      if (!exists) devices.push(demoDevice);
+    }
+  }
   return {
     customers: directory.customers,
     devices,
@@ -129,7 +149,7 @@ function parseDirectory(value: unknown): AdminDirectory {
     customEquipment: Array.isArray(directory.customEquipment)
       ? directory.customEquipment.filter((entry): entry is CustomEquipment => Boolean(entry && typeof entry.id === 'string' && entry.id && typeof entry.templateId === 'string' && instruments.some((instrument) => instrument.id === entry.templateId) && typeof entry.name === 'string' && entry.name.trim() && typeof entry.method === 'string' && entry.method.trim() && Array.isArray(entry.standardNames) && entry.standardNames.every((name) => typeof name === 'string')))
       : [],
-    seedVersion: 6,
+    seedVersion: 7,
   };
 }
 
