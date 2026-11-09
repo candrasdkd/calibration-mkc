@@ -223,6 +223,7 @@ export interface SafetyData {
 
 export interface CalibrationData {
   identity: IdentityData;
+  equipmentPhotos?: EquipmentPhotos;
   selectedDevices?: SelectedMeasurementDevice[];
   environment: EnvironmentData;
   references: MeasurementReferences;
@@ -233,6 +234,13 @@ export interface CalibrationData {
   infusionPump?: InfusionPumpData;
   suctionPump?: SuctionPumpData;
   safety: SafetyData;
+}
+
+export interface EquipmentPhotos {
+  front: string;
+  back: string;
+  left: string;
+  right: string;
 }
 
 export interface SelectedMeasurementDevice {

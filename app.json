@@ -25,6 +25,13 @@
     "plugins": [
       "expo-sharing",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Izinkan Kalibrasi Mobile mengambil foto alat untuk dokumentasi kalibrasi.",
+          "photosPermission": "Izinkan Kalibrasi Mobile memilih foto alat untuk dokumentasi kalibrasi."
+        }
+      ],
+      [
         "expo-router",
         {
           "apiRoutes": true

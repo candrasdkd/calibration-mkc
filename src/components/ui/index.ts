@@ -1,9 +1,12 @@
 export { ActionButton } from './ActionButton';
 export { Badge } from './Badge';
 export { Card } from './Card';
+export { CompactEntityCard } from './CompactEntityCard';
 export { Choice } from './Choice';
 export { ConfirmModal } from './ConfirmModal';
 export { DateField } from './DateField';
+export { DisclosureChevron } from './DisclosureChevron';
 export { Field } from './Field';
 export { Heading } from './Heading';
+export { SearchField } from './SearchField';
 export { ValueLine } from './ValueLine';

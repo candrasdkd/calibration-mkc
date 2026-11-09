@@ -3,10 +3,12 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Navbar } from '../../../components/Navbar';
-import { ActionButton, Badge, Card, Choice, DateField, Field, Heading, ValueLine } from '../../../components/ui';
+import { ActionButton, Badge, Card, Choice, ConfirmModal, DateField, DisclosureChevron, Field, Heading, ValueLine } from '../../../components/ui';
 import { PickerField } from '../../../components/picker/PickerField';
 import { PickerOption } from '../../../components/picker/PickerOption';
 import { SearchPickerModal } from '../../../components/picker/SearchPickerModal';
+import { CollapsibleCard } from '../components/CollapsibleCard';
+import { EquipmentPhotoStep } from '../components/EquipmentPhotoStep';
 import { calculateRecord } from '../../../core/calculations';
 import { getInstrumentTemplateId, getRecordInstrument } from '../../../core/instruments';
 import { useAdminData } from '../../admin/hooks/useAdminData';
@@ -18,6 +20,7 @@ import type {
   CalculationResult,
   CalibrationData,
   CalibrationRecord,
+  EquipmentPhotos,
   IdentityData,
   InspectionEntry,
   Instrument,
@@ -30,7 +33,7 @@ import type {
   WeighingStandardWeight,
 } from '../../../core/types';
 
-const steps = ['Identitas', 'Standar kalibrasi', 'Pengujian', 'Hasil'];
+const steps = ['Identitas', 'Foto alat', 'Standar kalibrasi', 'Pengujian', 'Hasil'];
 
 
 
@@ -39,7 +42,7 @@ const fmt = (value: number | null | undefined, digits = 2) => typeof value === '
 
 function StepTabs({ current, onChange }: { current: number; onChange: (step: number) => void }) {
   return <View style={styles.stepProgress}>
-    <View style={styles.stepProgressHeading}><Text style={styles.stepCounter}>LANGKAH {String(current + 1).padStart(2, '0')} / {steps.length}</Text><Text style={styles.stepCurrentTitle}>{steps[current]}</Text></View>
+    <View style={styles.stepProgressHeading}><Text style={styles.stepCounter}>LANGKAH {String(current + 1).padStart(2)} / {steps.length}</Text><Text style={styles.stepCurrentTitle}>{steps[current]}</Text></View>
     <View style={styles.stepTrack}>
       <View style={styles.progressLine}><View style={[styles.progressFill, { width: `${(current / (steps.length - 1)) * 100}%` }]} /></View>
       {steps.map((label, index) => <Pressable key={label} accessibilityRole="button" accessibilityState={{ selected: current === index }} onPress={() => onChange(index)} style={styles.stepNode}>
@@ -208,26 +211,26 @@ function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onRefe
       })}
     </Card> : null}
     <SearchPickerModal visible={pickerOpen} title="Pilih standar kalibrasi" search={search} placeholder="Cari nama, merek, tipe, atau nomor seri" onSearch={setSearch} onClose={() => setPickerOpen(false)}>
-            {deviceGroups.map((group) => {
-              const expanded = expandedName === group.key || Boolean(search.trim());
-              const chosenInGroup = selected.some((device) => deviceNameKey(device.name) === group.key);
-              return <View key={group.key} style={styles.deviceGroup}>
-                <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpandedName(expandedName === group.key ? null : group.key)} style={styles.deviceGroupHeader}>
-                  <View style={styles.deviceGroupCopy}><Text style={styles.deviceGroupName}>{group.name}</Text><Text style={styles.deviceGroupMeta}>{group.count} nomor seri · {selected.filter((device) => deviceNameKey(device.name) === group.key).length} dipilih</Text></View>
-                  <Text style={styles.deviceGroupToggle}>{expanded ? '−' : '+'}</Text>
-                </Pressable>
-                {expanded ? <View style={styles.deviceSerialList}>{group.devices.map((device, index) => {
-                  const chosen = selectedIds.has(device.id);
-                  const unavailable = chosenInGroup && !chosen;
-                  const profile = thermohygrometerProfile(device);
-                  return <PickerOption key={device.id} index={index + 1} label={device.serial} detail={`${device.brand} · ${device.model}`} selected={chosen} disabled={unavailable} status={chosen ? 'Dipilih' : unavailable ? 'Nama sudah dipilih' : 'Pilih'} statusTone={chosen ? 'good' : unavailable ? 'wait' : 'neutral'} onPress={() => onToggle(deviceSnapshot(device), profile)} accessory={device.isDemo ? <Badge text="Contoh" tone="wait" /> : null}>
-                    {device.isThermohygrometer && !profile ? <Text style={styles.deviceWarning}>Data koreksi sertifikat belum lengkap.</Text> : null}
-                  </PickerOption>;
-                })}</View> : null}
-              </View>;
-            })}
-            {matchingMissing.map((device) => <PickerOption key={device.id} label={device.name} detail={`${device.brand} · ${device.model} · S/N ${device.serial}`} selected status="Hapus" statusTone="wait" onPress={() => onToggle(device, null)}><Text style={styles.deviceWarning}>Sudah dihapus dari data master. Ketuk untuk menghapus pilihan ini.</Text></PickerOption>)}
-            {!deviceGroups.length && !matchingMissing.length ? <Text style={styles.devicePickerEmpty}>{normalizedSearch ? 'Tidak ada standar yang cocok.' : 'Belum ada standar untuk metode ini.'}</Text> : null}
+      {deviceGroups.map((group) => {
+        const expanded = expandedName === group.key || Boolean(search.trim());
+        const chosenInGroup = selected.some((device) => deviceNameKey(device.name) === group.key);
+        return <View key={group.key} style={styles.deviceGroup}>
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpandedName(expandedName === group.key ? null : group.key)} style={styles.deviceGroupHeader}>
+            <View style={styles.deviceGroupCopy}><Text style={styles.deviceGroupName}>{group.name}</Text><Text style={styles.deviceGroupMeta}>{group.count} nomor seri · {selected.filter((device) => deviceNameKey(device.name) === group.key).length} dipilih</Text></View>
+            <DisclosureChevron expanded={expanded} />
+          </Pressable>
+          {expanded ? <View style={styles.deviceSerialList}>{group.devices.map((device, index) => {
+            const chosen = selectedIds.has(device.id);
+            const unavailable = chosenInGroup && !chosen;
+            const profile = thermohygrometerProfile(device);
+            return <PickerOption key={device.id} index={index + 1} label={device.serial} detail={`${device.brand} · ${device.model}`} selected={chosen} disabled={unavailable} status={chosen ? 'Dipilih' : unavailable ? 'Nama sudah dipilih' : 'Pilih'} statusTone={chosen ? 'good' : unavailable ? 'wait' : 'neutral'} onPress={() => onToggle(deviceSnapshot(device), profile)} accessory={device.isDemo ? <Badge text="Contoh" tone="wait" /> : null}>
+              {device.isThermohygrometer && !profile ? <Text style={styles.deviceWarning}>Data koreksi sertifikat belum lengkap.</Text> : null}
+            </PickerOption>;
+          })}</View> : null}
+        </View>;
+      })}
+      {matchingMissing.map((device) => <PickerOption key={device.id} label={device.name} detail={`${device.brand} · ${device.model} · S/N ${device.serial}`} selected status="Hapus" statusTone="wait" onPress={() => onToggle(device, null)}><Text style={styles.deviceWarning}>Sudah dihapus dari data master. Ketuk untuk menghapus pilihan ini.</Text></PickerOption>)}
+      {!deviceGroups.length && !matchingMissing.length ? <Text style={styles.devicePickerEmpty}>{normalizedSearch ? 'Tidak ada standar yang cocok.' : 'Belum ada standar untuk metode ini.'}</Text> : null}
     </SearchPickerModal>
     <SearchPickerModal visible={Boolean(activeWeightPoint)} title={activeWeightPoint ? `Anak timbangan · ${activeWeightPoint.loadKg} kg` : 'Pilih anak timbangan'} search={weightSearch} placeholder="Cari nomor seri atau massa" onSearch={setWeightSearch} onClose={() => setWeightPickerPointId(null)}>
       {activeWeightPoint ? filteredWeights.map(({ device, standard }, index) => {
@@ -249,8 +252,7 @@ function EnvironmentStep({ data, update, result, mainsVoltage = false }: { data:
   const { environment } = data;
   const calculated = result.environment;
   return <>
-    <Card>
-      <Heading title="Kondisi lingkungan" hint="Thermohygrometer acuan dipilih pada langkah Standar kalibrasi. Koreksi mengikuti tabel sertifikat pada data standar." />
+    <CollapsibleCard title="Kondisi lingkungan" hint="Thermohygrometer acuan dipilih pada langkah Standar kalibrasi. Koreksi mengikuti tabel sertifikat pada data standar.">
       <ValueLine label="Thermohygrometer acuan" value={calculated.reference?.serial ?? 'Belum dipilih'} />
       {calculated.reference?.serial === 'EFG19BE02500' ? <Text style={styles.sourceWarning}>Workbook memuat koreksi RH +10,1% pada titik 50% untuk acuan ini. Nilai disalin apa adanya; verifikasi sertifikat sebelum digunakan.</Text> : null}
       <Field label="Suhu awal" value={environment.temperatureStart} onChange={(value) => update('environment', 'temperatureStart', value)} keyboard="decimal-pad" suffix="°C" />
@@ -264,7 +266,7 @@ function EnvironmentStep({ data, update, result, mainsVoltage = false }: { data:
         <Text style={styles.liveText}>Kelembaban {fmt(calculated.humidity.mean)} ± {fmt(calculated.humidity.u95)}%</Text>
       </View> : null}
       {calculated.errors.map((error) => <Text key={error} style={styles.errorText}>{error}</Text>)}
-    </Card>
+    </CollapsibleCard>
   </>;
 }
 
@@ -288,8 +290,7 @@ function InspectionButtons({ item, kind, value, onChange }: {
 
 function InspectionStep({ data, updateInspection }: { data: CalibrationData; updateInspection: InspectionUpdate }) {
   const [expandedNote, setExpandedNote] = useState<number | null>(null);
-  return <Card>
-    <Heading title="Pemeriksaan fisik dan fungsi" hint="Pilih ✓ untuk Baik atau × untuk Tidak baik. Catatan tersedia per bagian." />
+  return <CollapsibleCard title="Pemeriksaan fisik dan fungsi" hint="Pilih ✓ untuk Baik atau × untuk Tidak baik. Catatan tersedia per bagian.">
     <View style={styles.inspectionHeader}>
       <Text style={styles.inspectionPartHeader}>Bagian alat</Text>
       <Text style={styles.inspectionColumnHeader}>Fisik</Text>
@@ -308,15 +309,14 @@ function InspectionStep({ data, updateInspection }: { data: CalibrationData; upd
       </View>
       {expandedNote === index ? <Field label={`Catatan · ${item.label}`} value={item.note} onChange={(value) => updateInspection(index, 'note', value)} multiline /> : item.note ? <Text numberOfLines={1} style={styles.notePreview}>Catatan: {item.note}</Text> : null}
     </View>)}
-  </Card>;
+  </CollapsibleCard>;
 }
 
 function SafetyStep({ data, update, safetyResult }: { data: CalibrationData; update: FieldUpdate; safetyResult: SafetyResult | null }) {
   const safety = data.safety;
   const limit = (label: string) => safetyResult?.checks.find((check) => check.label === label)?.limit || '—';
   const threshold = (label: string) => <Text style={styles.thresholdText}>Ambang batas: {limit(label)}</Text>;
-  return <Card>
-    <Heading title="Keselamatan listrik" hint="Ambang kategori mengikuti tabel tipe kabel dan arus bocor pada workbook alat." />
+  return <CollapsibleCard title="Keselamatan listrik" hint="Ambang kategori mengikuti tabel tipe kabel dan arus bocor pada workbook alat.">
     <Field label="Tegangan jala-jala" value={safety.voltage} onChange={(value) => update('safety', 'voltage', value)} keyboard="decimal-pad" suffix="V" />
     {threshold('Tegangan jala-jala')}
     <Choice label="Tipe kabel / pembumian" value={safety.earthType} onChange={(value) => update('safety', 'earthType', value)} options={[
@@ -348,7 +348,7 @@ function SafetyStep({ data, update, safetyResult }: { data: CalibrationData; upd
       ? <Text style={styles.exportNote}>Hasil resistansi isolasi disimpan sebagai OL.</Text>
       : <Field label="Nilai resistansi isolasi" value={safety.insulationResistance} onChange={(value) => update('safety', 'insulationResistance', value)} keyboard="decimal-pad" placeholder="Contoh: 300" suffix="MΩ" />}
     {threshold('Resistansi isolasi')}
-  </Card>;
+  </CollapsibleCard>;
 }
 
 function FetalSafetyStep({ data, update }: { data: CalibrationData; update: FieldUpdate }) {
@@ -359,8 +359,7 @@ function FetalSafetyStep({ data, update }: { data: CalibrationData; update: Fiel
     onChange={(value) => update('safety', key, value)}
     options={[{ value: 'Ya', label: 'Ya' }, { value: 'Tidak', label: 'Tidak' }]}
   />;
-  return <Card>
-    <Heading title="Keselamatan listrik" hint="Isi angka terukur dan status Ya/Tidak seperti di LK. Workbook tidak menetapkan ambang batas untuk bagian ini." />
+  return <CollapsibleCard title="Keselamatan listrik" hint="Isi angka terukur dan status Ya/Tidak seperti di LK. Workbook tidak menetapkan ambang batas untuk bagian ini.">
     <Field label="Resistansi pembumian protektif" value={safety.earthResistance} onChange={(value) => update('safety', 'earthResistance', value)} keyboard="decimal-pad" suffix="Ω" />
     {compliance('Resistansi pembumian protektif', 'earthMeets')}
     <Field label="Arus bocor peralatan" value={safety.equipmentLeakage} onChange={(value) => update('safety', 'equipmentLeakage', value)} keyboard="decimal-pad" suffix="mA" />
@@ -374,7 +373,7 @@ function FetalSafetyStep({ data, update }: { data: CalibrationData; update: Fiel
       ? <Text style={styles.exportNote}>Hasil resistansi isolasi disimpan sebagai OL.</Text>
       : <Field label="Nilai resistansi isolasi" value={safety.insulationResistance} onChange={(value) => update('safety', 'insulationResistance', value)} keyboard="decimal-pad" suffix="MΩ" />}
     {compliance('Resistansi isolasi', 'insulationMeets')}
-  </Card>;
+  </CollapsibleCard>;
 }
 
 function WeighingStep({ instrument, data, result, updatePoint, updateRepeatability }: {
@@ -389,8 +388,7 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
   const calculated = result.weighing;
   if (!config || !weighing || !calculated) return null;
   return <>
-    <Card>
-      <Heading title={`Uji berulang · ${config.repeatabilityLoadKg} kg`} hint="Masukkan nilai zero (z) dan penunjukan (m) sebanyak 10 kali. Selisih r = m − z dihitung otomatis." />
+    <CollapsibleCard title={`Uji berulang · ${config.repeatabilityLoadKg} kg`} hint="Masukkan nilai zero (z) dan penunjukan (m) sebanyak 10 kali. Selisih r = m − z dihitung otomatis.">
       {weighing.repeatabilityReadings.map((reading, index) => <View key={index} style={styles.performanceCard}>
         <Text style={styles.readingLabel}>Pengulangan {index + 1}</Text>
         <View style={styles.settingRow}>
@@ -403,9 +401,8 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
         <Text style={styles.inlineStat}>STDEV bacaan {fmt(calculated.repeatabilityStandardDeviation, 6)} kg</Text>
         <Text style={styles.inlineStat}>Nilai SD laporan Excel {fmt(calculated.reportStandardDeviation, 6)} kg</Text>
       </View> : null}
-    </Card>
-    <Card>
-      <Heading title="Pengujian beban" hint="Anak timbangan dipilih pada langkah Standar kalibrasi. Masukkan bacaan nol dan bacaan berbeban di setiap titik." />
+    </CollapsibleCard>
+    <CollapsibleCard title="Pengujian beban" hint="Anak timbangan dipilih pada langkah Standar kalibrasi. Masukkan bacaan nol dan bacaan berbeban di setiap titik.">
       {config.points.map((point, index) => {
         const measurement = weighing.points.find((item) => item.id === point.id);
         const output = calculated.points[index];
@@ -428,7 +425,7 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
           </View> : null}
         </View>;
       })}
-    </Card>
+    </CollapsibleCard>
   </>;
 }
 
@@ -480,21 +477,18 @@ function SphygmomanometerStep({ data, result, onChange }: {
   });
   const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
   return <>
-    <Card>
-      <Heading title="Uji kebocoran" hint="Pompa hingga 250 mmHg, lalu catat penurunan tekanan setelah 1 menit." />
+    <CollapsibleCard title="Uji kebocoran" hint="Pompa hingga 250 mmHg, lalu catat penurunan tekanan setelah 1 menit.">
       <Field label="Penurunan tekanan" value={data.leakageDrop} onChange={(value) => onChange({ ...data, leakageDrop: value })} keyboard="decimal-pad" suffix="mmHg" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas penurunan ≤ 15 mmHg</Text>{outcome(result.leakageDrop.pass)}</View>
-    </Card>
-    <Card>
-      <Heading title="Uji deflasi cepat" hint="Pompa hingga 260 mmHg, buka valve dan catat waktu deflasi." />
+    </CollapsibleCard>
+    <CollapsibleCard title="Uji deflasi cepat" hint="Pompa hingga 260 mmHg, buka valve dan catat waktu deflasi.">
       <Field label="Waktu deflasi" value={data.rapidDeflationSeconds} onChange={(value) => onChange({ ...data, rapidDeflationSeconds: value })} keyboard="decimal-pad" suffix="detik" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.rapidDeflationSeconds.pass)}</View>
-    </Card>
-    <Card>
-      <Heading title="Uji ketepatan tekanan" hint="Isi tabel tekanan naik sampai selesai, lalu lanjutkan ke tabel tekanan turun. Setiap setting memakai tiga bacaan Digital Pressure Meter." />
+    </CollapsibleCard>
+    <CollapsibleCard title="Uji ketepatan tekanan" hint="Isi tabel tekanan naik sampai selesai, lalu lanjutkan ke tabel tekanan turun. Setiap setting memakai tiga bacaan Digital Pressure Meter.">
       <PressureDirectionTable title="1. Tekanan naik" direction="up" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
       <PressureDirectionTable title="2. Tekanan turun" direction="down" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
-    </Card>
+    </CollapsibleCard>
   </>;
 }
 
@@ -514,8 +508,7 @@ function SuctionPumpStep({ data, result, config, onChange }: {
   });
   const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
   return <>
-    <Card>
-      <Heading title="Uji tekanan vakum" hint={`Masukkan ${legacy ? 3 : 6} bacaan DPM saat tekanan naik dan saat turun. Angka dimasukkan tanpa tanda minus.`} />
+    <CollapsibleCard title="Uji tekanan vakum" hint={`Masukkan ${legacy ? 3 : 6} bacaan DPM saat tekanan naik dan saat turun. Angka dimasukkan tanpa tanda minus.`}>
       {data.pressureReadings.map((point) => {
         const calculated = result.pressureReadings.find((item) => item.setting === point.setting);
         return <View key={point.setting} style={styles.performanceCard}>
@@ -534,16 +527,15 @@ function SuctionPumpStep({ data, result, config, onChange }: {
           })}
         </View>;
       })}
-    </Card>
-    <Card>
-      <Heading title="Daya hisap maksimum" hint={legacy
-        ? 'Atur alat hingga vakum minimal 300 mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.'
-        : `Atur vakum pada rentang ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.`} />
+    </CollapsibleCard>
+    <CollapsibleCard title="Daya hisap maksimum" hint={legacy
+      ? 'Atur alat hingga vakum minimal 300 mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.'
+      : `Atur vakum pada rentang ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg, lalu catat waktu sampai daya hisap maksimum tercapai.`}>
       <Field label="Bacaan tekanan vakum maksimum" value={data.maximumVacuumReading} onChange={(value) => onChange({ ...data, maximumVacuumReading: value })} keyboard="decimal-pad" suffix="mmHg · isi besar vakum" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>{legacy ? 'Batas vakum ≥ 300 mmHg' : `Batas vakum ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg`}</Text>{outcome(result.maximumVacuumReadingPass)}</View>
       <Field label="Waktu mencapai vakum maksimum" value={data.maximumVacuumSeconds} onChange={(value) => onChange({ ...data, maximumVacuumSeconds: value })} keyboard="decimal-pad" suffix="detik" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.maximumVacuumPass)}</View>
-    </Card>
+    </CollapsibleCard>
   </>;
 }
 
@@ -571,64 +563,62 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
     {instrument.sphygmomanometer && data.sphygmomanometer && result.sphygmomanometer
       ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} onChange={updateSphygmomanometer} />
       : instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} />
-      : instrument.suctionPump ? null : <Card>
-      <Heading title="Pengujian kinerja" hint={templateId === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
-      {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
-      {data.performance.map((row, rowIndex) => {
-        const calculated = result.performance[rowIndex].result;
-        const absoluteTolerance = Number(row.absoluteTolerance?.replace(',', '.') ?? 0);
-        const percentTolerance = Number(row.tolerancePercent.replace(',', '.') ?? 0);
-        const limitLabel = row.formula === 'workbookMinimum' ? `Batas minimum ≥ ${row.setting} ${row.unit}`
-          : row.formula === 'workbookMaximum' ? `Batas maksimum ≤ ${row.setting} ${row.unit}`
-            : row.formula === 'workbookBand' ? `Rentang ${row.minimumSetting}–${row.maximumSetting} ${row.unit}`
-              : row.formula === 'workbookRange' ? `Variasi maksimum ${row.absoluteTolerance} ${row.unit}`
-              : absoluteTolerance && percentTolerance ? `±${percentTolerance}% atau ${row.absoluteTolerance} ${row.unit}`
-                : absoluteTolerance ? `±${row.absoluteTolerance} ${row.unit}` : `±${row.tolerancePercent}%`;
-        const renderReadings = (values: string[], field: 'readings' | 'standardReadings' | 'pairedReadings', title: string) => <>
-          <Text style={styles.labelLike}>{title} · {values.length} kali sesuai Excel</Text>
-          <View style={styles.readingsGrid}>{values.map((value, readingIndex) => <View key={readingIndex} style={styles.readingCell}>
-            <Text style={styles.readingLabel}>Bacaan {readingIndex + 1}</Text>
-            <TextInput accessibilityLabel={`${row.label}, ${title}, bacaan ${readingIndex + 1}`} value={value} onChangeText={(next) => updatePerformance(rowIndex, field, next, readingIndex)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
-          </View>)}</View>
-        </>;
-        return <View key={row.id} style={styles.performanceCard}>
-          <View style={styles.performanceHeading}>
-            <Text style={styles.itemTitle}>{row.label} · {row.unit}</Text>
-            {calculated ? <Badge text={calculated.pass ? 'LULUS' : 'TIDAK LULUS'} tone={calculated.pass ? 'good' : 'bad'} /> : <Badge text="MENUNGGU" tone="wait" />}
-          </View>
-          <View style={styles.settingRow}>
-            <View style={styles.settingField}><Field label={row.formula === 'workbookMinimum' ? 'Batas minimum' : row.formula === 'workbookMaximum' ? 'Batas maksimum' : row.formula === 'workbookBand' ? 'Titik tengah' : row.formula === 'workbookRange' ? 'Suhu kontrol' : 'Setting'} value={row.setting} onChange={(value) => updatePerformance(rowIndex, 'setting', value)} keyboard="decimal-pad" suffix={row.unit} editable={row.formula !== 'workbookBand' && row.formula !== 'workbookRange'} /></View>
-            <Text style={styles.toleranceNote}>{limitLabel}</Text>
-          </View>
-          {row.formula === 'workbookRange' ? <Text style={styles.readingsHint}>Rentang dihitung otomatis dari bacaan minimum dan maksimum sensor terkait.</Text> : <Text style={styles.readingsHint}>Ketuk setiap kolom untuk memasukkan atau mengubah angka bacaan.</Text>}
-          {row.includeInScore === false ? <Text style={styles.readingsHint}>Dicatat di lembar hasil, tetapi tidak masuk skor Excel.</Text> : null}
-          {row.formula === 'workbookComparisonAccuracy' ? <>
-            {renderReadings(row.readings, 'readings', 'Bacaan UUT')}
-            {renderReadings(row.standardReadings ?? [], 'standardReadings', 'Bacaan standar')}
-          </> : row.formula === 'workbookPairedAccuracy' ? <>
-            {renderReadings(row.readings, 'readings', 'Bacaan minimum')}
-            {renderReadings(row.pairedReadings ?? [], 'pairedReadings', 'Bacaan maksimum')}
-          </> : row.formula === 'workbookRange' ? null : renderReadings(row.readings, 'readings', 'Bacaan terukur')}
-          {calculated ? <View style={styles.inlineStats}>
-            <Text style={styles.inlineStat}>{row.formula === 'workbookRange' ? `Rentang max − min ${fmt(calculated.testValue)} ${row.unit}` : `Rata-rata ${fmt(calculated.mean)}`}</Text>
-            {calculated.standardMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata standar {fmt(calculated.standardMean)} · U95 {fmt(calculated.standardU95)}</Text> : null}
-            {calculated.correction !== null && row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>Koreksi {fmt(calculated.correction)}</Text> : null}
-            {calculated.correctedMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(calculated.correctedMean)}</Text> : null}
-            {calculated.error !== undefined ? <Text style={styles.inlineStat}>Galat {fmt(calculated.error)} · {fmt(calculated.testValue * 100, 2)}%</Text> : null}
-            {row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>{row.includeUncertainty === false ? 'Ketidakpastian tidak dipakai untuk keputusan Excel' : `U95 ${fmt(calculated.u95)}`}</Text> : null}
-          </View> : null}
-        </View>;
-      })}
-    </Card>}
-    {infusionResult && infusionPump ? <Card>
-      <Heading title="Uji kemampatan / occlusion" hint="Setting 100 mL/h · masukkan enam bacaan analyzer dalam psi." />
+        : instrument.suctionPump ? null : <CollapsibleCard title="Pengujian kinerja" hint={templateId === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'}>
+          {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
+          {data.performance.map((row, rowIndex) => {
+            const calculated = result.performance[rowIndex].result;
+            const absoluteTolerance = Number(row.absoluteTolerance?.replace(',', '.') ?? 0);
+            const percentTolerance = Number(row.tolerancePercent.replace(',', '.') ?? 0);
+            const limitLabel = row.formula === 'workbookMinimum' ? `Batas minimum ≥ ${row.setting} ${row.unit}`
+              : row.formula === 'workbookMaximum' ? `Batas maksimum ≤ ${row.setting} ${row.unit}`
+                : row.formula === 'workbookBand' ? `Rentang ${row.minimumSetting}–${row.maximumSetting} ${row.unit}`
+                  : row.formula === 'workbookRange' ? `Variasi maksimum ${row.absoluteTolerance} ${row.unit}`
+                    : absoluteTolerance && percentTolerance ? `±${percentTolerance}% atau ${row.absoluteTolerance} ${row.unit}`
+                      : absoluteTolerance ? `±${row.absoluteTolerance} ${row.unit}` : `±${row.tolerancePercent}%`;
+            const renderReadings = (values: string[], field: 'readings' | 'standardReadings' | 'pairedReadings', title: string) => <>
+              <Text style={styles.labelLike}>{title} · {values.length} kali sesuai Excel</Text>
+              <View style={styles.readingsGrid}>{values.map((value, readingIndex) => <View key={readingIndex} style={styles.readingCell}>
+                <Text style={styles.readingLabel}>Bacaan {readingIndex + 1}</Text>
+                <TextInput accessibilityLabel={`${row.label}, ${title}, bacaan ${readingIndex + 1}`} value={value} onChangeText={(next) => updatePerformance(rowIndex, field, next, readingIndex)} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
+              </View>)}</View>
+            </>;
+            return <View key={row.id} style={styles.performanceCard}>
+              <View style={styles.performanceHeading}>
+                <Text style={styles.itemTitle}>{row.label} · {row.unit}</Text>
+                {calculated ? <Badge text={calculated.pass ? 'LULUS' : 'TIDAK LULUS'} tone={calculated.pass ? 'good' : 'bad'} /> : <Badge text="MENUNGGU" tone="wait" />}
+              </View>
+              <View style={styles.settingRow}>
+                <View style={styles.settingField}><Field label={row.formula === 'workbookMinimum' ? 'Batas minimum' : row.formula === 'workbookMaximum' ? 'Batas maksimum' : row.formula === 'workbookBand' ? 'Titik tengah' : row.formula === 'workbookRange' ? 'Suhu kontrol' : 'Setting'} value={row.setting} onChange={(value) => updatePerformance(rowIndex, 'setting', value)} keyboard="decimal-pad" suffix={row.unit} editable={row.formula !== 'workbookBand' && row.formula !== 'workbookRange'} /></View>
+                <Text style={styles.toleranceNote}>{limitLabel}</Text>
+              </View>
+              {row.formula === 'workbookRange' ? <Text style={styles.readingsHint}>Rentang dihitung otomatis dari bacaan minimum dan maksimum sensor terkait.</Text> : <Text style={styles.readingsHint}>Ketuk setiap kolom untuk memasukkan atau mengubah angka bacaan.</Text>}
+              {row.includeInScore === false ? <Text style={styles.readingsHint}>Dicatat di lembar hasil, tetapi tidak masuk skor Excel.</Text> : null}
+              {row.formula === 'workbookComparisonAccuracy' ? <>
+                {renderReadings(row.readings, 'readings', 'Bacaan UUT')}
+                {renderReadings(row.standardReadings ?? [], 'standardReadings', 'Bacaan standar')}
+              </> : row.formula === 'workbookPairedAccuracy' ? <>
+                {renderReadings(row.readings, 'readings', 'Bacaan minimum')}
+                {renderReadings(row.pairedReadings ?? [], 'pairedReadings', 'Bacaan maksimum')}
+              </> : row.formula === 'workbookRange' ? null : renderReadings(row.readings, 'readings', 'Bacaan terukur')}
+              {calculated ? <View style={styles.inlineStats}>
+                <Text style={styles.inlineStat}>{row.formula === 'workbookRange' ? `Rentang max − min ${fmt(calculated.testValue)} ${row.unit}` : `Rata-rata ${fmt(calculated.mean)}`}</Text>
+                {calculated.standardMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata standar {fmt(calculated.standardMean)} · U95 {fmt(calculated.standardU95)}</Text> : null}
+                {calculated.correction !== null && row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>Koreksi {fmt(calculated.correction)}</Text> : null}
+                {calculated.correctedMean !== undefined ? <Text style={styles.inlineStat}>Rata-rata terkoreksi {fmt(calculated.correctedMean)}</Text> : null}
+                {calculated.error !== undefined ? <Text style={styles.inlineStat}>Galat {fmt(calculated.error)} · {fmt(calculated.testValue * 100, 2)}%</Text> : null}
+                {row.formula !== 'workbookRange' ? <Text style={styles.inlineStat}>{row.includeUncertainty === false ? 'Ketidakpastian tidak dipakai untuk keputusan Excel' : `U95 ${fmt(calculated.u95)}`}</Text> : null}
+              </View> : null}
+            </View>;
+          })}
+        </CollapsibleCard>}
+    {infusionResult && infusionPump ? <CollapsibleCard title="Uji kemampatan / occlusion" hint="Setting 100 mL/h · masukkan enam bacaan analyzer dalam psi.">
       <View style={styles.readingsGrid}>{infusionPump.occlusionReadings.map((value, index) => <View key={index} style={styles.readingCell}>
         <Text style={styles.readingLabel}>Bacaan {index + 1}</Text>
         <TextInput accessibilityLabel={`Occlusion, bacaan ${index + 1}`} value={value} onChangeText={(next) => updateInfusionPump({ ...infusionPump, occlusionReadings: infusionPump.occlusionReadings.map((reading, itemIndex) => itemIndex === index ? next : reading) })} keyboardType="decimal-pad" placeholder="—" placeholderTextColor="#8995A1" style={styles.readingInput} />
       </View>)}</View>
       {result.pumpOcclusion ? <View style={styles.inlineStats}><Text style={styles.inlineStat}>Rata-rata {fmt(result.pumpOcclusion.mean)} psi</Text><Text style={styles.inlineStat}>Koreksi standar {fmt(result.pumpOcclusion.correction)} psi</Text><Text style={styles.inlineStat}>U95 {fmt(result.pumpOcclusion.uncertaintyU95)} psi</Text><Text style={styles.inlineStat}>Batas rata-rata ≤ {result.pumpOcclusion.limit} psi</Text></View> : null}
       {result.pumpOcclusion ? <View style={styles.resultLine}><Text style={styles.resultLabel}>Hasil uji occlusion</Text><Badge text={result.pumpOcclusion.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.pumpOcclusion.pass ? 'good' : 'bad'} /></View> : null}
-    </Card> : null}
+    </CollapsibleCard> : null}
     {instrument.suctionPump && data.suctionPump && result.suctionPump ? <SuctionPumpStep data={data.suctionPump} result={result.suctionPump} config={instrument.suctionPump} onChange={updateSuctionPump} /> : null}
   </>;
 }
@@ -777,6 +767,7 @@ export default function CalibrationScreen() {
   const { customers, devices, equipmentMethods, customEquipment, loaded: directoryLoaded } = useAdminData();
   const record = useMemo<CalibrationRecord | undefined>(() => records.find((item) => item.id === String(id)), [records, id]);
   const [step, setStep] = useState(0);
+  const [confirmFinish, setConfirmFinish] = useState(false);
   const instrument = record ? getRecordInstrument(record) : null;
   const data = record?.data;
   const result = instrument && data ? calculateRecord(instrument, data) : null;
@@ -807,15 +798,17 @@ export default function CalibrationScreen() {
       }),
       standardsInitialized: true,
     } : data.weighing;
-    updateRecord(record.id, { data: {
-      ...data,
-      identity: data.identity.customerId === undefined || missingMethod ? { ...data.identity, ...(data.identity.customerId === undefined ? { customerId: legacyCustomer?.id ?? '' } : {}), ...(missingMethod ? { method: configuredMethod } : {}) } : data.identity,
-      selectedDevices: data.selectedDevices ?? legacyDevices,
-      environment: data.environment.reference === undefined
-        ? { ...data.environment, standardId: legacyReference?.id ?? data.environment.standardId, reference: legacyReference }
-        : data.environment,
-      ...(weighing ? { weighing } : {}),
-    } });
+    updateRecord(record.id, {
+      data: {
+        ...data,
+        identity: data.identity.customerId === undefined || missingMethod ? { ...data.identity, ...(data.identity.customerId === undefined ? { customerId: legacyCustomer?.id ?? '' } : {}), ...(missingMethod ? { method: configuredMethod } : {}) } : data.identity,
+        selectedDevices: data.selectedDevices ?? legacyDevices,
+        environment: data.environment.reference === undefined
+          ? { ...data.environment, standardId: legacyReference?.id ?? data.environment.standardId, reference: legacyReference }
+          : data.environment,
+        ...(weighing ? { weighing } : {}),
+      }
+    });
   }, [customers, data, devices, directoryLoaded, equipmentMethods, instrument, record, updateRecord]);
 
   if (!record || !instrument || !data || !result) return <SafeAreaView style={styles.safe}><Navbar title="Pengerjaan" onBack={() => router.replace('/')} backLabel="Kembali ke menu" /><View style={styles.missingScreen}><Text style={styles.outcomeTitle}>Catatan tidak ditemukan</Text><ActionButton title="Kembali ke catatan" onPress={() => router.replace('/')} /></View></SafeAreaView>;
@@ -823,13 +816,20 @@ export default function CalibrationScreen() {
   const update: FieldUpdate = (section, key, value) => updateRecord(record.id, {
     data: { ...data, [section]: { ...data[section], [key]: value } } as CalibrationData,
   });
+  const updateEquipmentPhoto = (side: keyof EquipmentPhotos, uri: string) => updateRecord(record.id, {
+    data: { ...data, equipmentPhotos: { front: '', back: '', left: '', right: '', ...data.equipmentPhotos, [side]: uri } },
+  });
   const selectCustomer = (customerId: string) => {
     const customer = customers.find((item) => item.id === customerId);
-    updateRecord(record.id, { data: { ...data, identity: {
-      ...data.identity,
-      customerId: customer?.id ?? '', customer: customer?.name ?? '',
-      address: customer?.address ?? '', city: customer ? `${customer.city}, ${customer.province}` : '',
-    } } });
+    updateRecord(record.id, {
+      data: {
+        ...data, identity: {
+          ...data.identity,
+          customerId: customer?.id ?? '', customer: customer?.name ?? '',
+          address: customer?.address ?? '', city: customer ? `${customer.city}, ${customer.province}` : '',
+        }
+      }
+    });
   };
   const toggleDevice = (device: SelectedMeasurementDevice, profile: Thermohygrometer | null) => {
     const current = data.selectedDevices ?? [];
@@ -897,15 +897,31 @@ export default function CalibrationScreen() {
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {step === 0 ? <IdentityStep data={data} instrument={instrument} customers={customers} loaded={directoryLoaded} update={update} selectCustomer={selectCustomer} /> : null}
-        {step === 1 ? <SelectDevicesStep instrument={instrument} data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} onToggleWeights={updateWeighingWeights} /> : null}
-        {step === 2 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} updateSphygmomanometer={updateSphygmomanometer} updateInfusionPump={updateInfusionPump} updateSuctionPump={updateSuctionPump} /> : null}
-        {step === 3 ? <ResultStep data={data} result={result} instrument={instrument} /> : null}
-        <View style={styles.navigationButtons}>
-          {step > 0 ? <View style={styles.navButton}><ActionButton title="Sebelumnya" secondary onPress={() => setStep(step - 1)} /></View> : <View style={styles.navButton}><ActionButton title="Selesai" secondary onPress={() => router.replace('/')} /></View>}
-          {step < steps.length - 1 ? <View style={styles.navButton}><ActionButton title="Lanjut" onPress={() => setStep(step + 1)} /></View> : <View style={styles.navButton}><ActionButton title="Selesai" onPress={() => router.replace('/')} /></View>}
-        </View>
-        <Text style={styles.autosaveNote}>Perubahan disimpan otomatis di perangkat.</Text>
+        {step === 1 ? <EquipmentPhotoStep photos={data.equipmentPhotos} onChange={updateEquipmentPhoto} /> : null}
+        {step === 2 ? <SelectDevicesStep instrument={instrument} data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} onToggleWeights={updateWeighingWeights} /> : null}
+        {step === 3 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} updateSphygmomanometer={updateSphygmomanometer} updateInfusionPump={updateInfusionPump} updateSuctionPump={updateSuctionPump} /> : null}
+        {step === 4 ? <ResultStep data={data} result={result} instrument={instrument} /> : null}
       </ScrollView>
+      <View style={styles.navigationFooter}>
+        <Text style={styles.autosaveNote}>Perubahan disimpan otomatis di perangkat.</Text>
+        <View style={styles.navigationButtons}>
+          {step > 0 ? <View style={styles.navButton}><ActionButton title="Sebelumnya" secondary onPress={() => setStep(step - 1)} /></View> : null}
+          <View style={styles.navButton}>
+            {step < steps.length - 1
+              ? <ActionButton title="Lanjut" onPress={() => setStep(step + 1)} />
+              : <ActionButton title="Selesai · Buat QR" onPress={() => { if (result.complete) setConfirmFinish(true); }} disabled={!result.complete} />}
+          </View>
+        </View>
+        {step === steps.length - 1 && !result.complete ? <Text style={styles.finishValidation}>Masih ada {result.missing.length} data wajib yang belum lengkap. Cek daftar di atas sebelum membuat QR.</Text> : null}
+      </View>
     </KeyboardAvoidingView>
+    <ConfirmModal
+      visible={confirmFinish}
+      title="Selesaikan pengerjaan?"
+      message="Setelah dikonfirmasi, QR ringkasan hasil kalibrasi akan dibuat."
+      confirmLabel="Buat QR"
+      onCancel={() => setConfirmFinish(false)}
+      onConfirm={() => { setConfirmFinish(false); if (result.complete) router.push(`/calibration-result?id=${record.id}`); }}
+    />
   </SafeAreaView>;
 }

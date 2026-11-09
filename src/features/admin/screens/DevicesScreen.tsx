@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ActionButton, Badge, Card, Choice, ConfirmModal, Field, Heading } from '../../../components/ui';
+import { ActionButton, Badge, Card, Choice, ConfirmModal, DisclosureChevron, Field, Heading, SearchField } from '../../../components/ui';
 import { useAdminData } from '../hooks/useAdminData';
 import type { MeasuringDevice, ThermohygrometerCertificate, WeighingStandardCalibration } from '../../../core/admin-data';
 import { ScreenPage } from '../../../components/ScreenPage';
@@ -24,10 +24,17 @@ export function DevicesScreen() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const locked = !data.loaded || Boolean(data.storageError);
+  const query = search.trim().toLowerCase();
   const deviceGroups = [...new Set(data.devices.map((device) => device.name.trim().toLowerCase()))].map((key) => {
     const devices = data.devices.filter((device) => device.name.trim().toLowerCase() === key);
     return { key, name: devices[0]?.name ?? key, devices };
+  });
+  const filteredGroups = deviceGroups.flatMap((group) => {
+    const nameMatches = group.name.toLowerCase().includes(query);
+    const devices = !query || nameMatches ? group.devices : group.devices.filter((device) => `${device.brand} ${device.model} ${device.serial}`.toLowerCase().includes(query));
+    return devices.length ? [{ ...group, devices }] : [];
   });
   const editDevice = (device: MeasuringDevice) => {
     setSelectedSerial(null);
@@ -72,13 +79,14 @@ export function DevicesScreen() {
     <StorageMessage message={data.storageError} />
     <ActionButton title="＋ Tambah standar" onPress={() => setEditing(blankDevice())} disabled={locked} />
     <Text style={styles.groupInstruction}>Pilih jenis standar untuk melihat nomor seri dan data sertifikatnya.</Text>
-    {deviceGroups.map((group) => {
+    <SearchField accessibilityLabel="Cari standar kalibrasi" value={search} onChange={setSearch} placeholder="Cari jenis, merek, tipe, atau nomor seri" />
+    {filteredGroups.length ? filteredGroups.map((group) => {
       const expanded = expandedName === group.key;
       return <Card key={group.key} style={styles.groupCard}>
         <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => { setExpandedName(expanded ? null : group.key); if (expanded) setSelectedSerial(null); }} style={styles.groupHeader}>
           <View style={[styles.entityAvatar, styles.deviceAvatar]}><Text style={styles.entityAvatarText}>AM</Text></View>
-          <View style={styles.entityCopy}><Text style={styles.entityTitle}>{group.name}</Text><Text style={styles.entitySubtitle}>{group.devices.length} nomor seri terdaftar</Text></View>
-          <View style={styles.groupToggle}><Text style={styles.groupToggleText}>{expanded ? '−' : '+'}</Text></View>
+          <View style={styles.entityCopy}><Text style={styles.entityTitle}>{group.name}</Text><Text style={styles.entitySubtitle}>{query ? `${group.devices.length} nomor seri ditampilkan` : `${group.devices.length} nomor seri terdaftar`}</Text></View>
+          <DisclosureChevron expanded={expanded} />
         </Pressable>
         {expanded ? <View style={styles.serialList}>
           {group.devices.map((device, index) => {
@@ -111,7 +119,7 @@ export function DevicesScreen() {
           })}
         </View> : null}
       </Card>;
-    })}
+    }) : <Card style={styles.emptyState}><Heading title={query ? 'Standar tidak ditemukan' : 'Belum ada standar'} hint={query ? 'Coba kata kunci lain atau hapus pencarian.' : 'Tambahkan standar kalibrasi untuk menggunakannya pada pengerjaan.'} /></Card>}
     <Modal visible={Boolean(editing)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

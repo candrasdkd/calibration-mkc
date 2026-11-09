@@ -584,6 +584,7 @@ export function createInitialData(instrumentId: string): CalibrationData {
       accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : instrument.sphygmomanometer ? String(instrument.sphygmomanometer.accuracyClass) : '',
       technician: '', receivedDate: today, testDate: today, issueDate: '', room: '', customer: '', address: '', city: '', method: '',
     },
+    equipmentPhotos: { front: '', back: '', left: '', right: '' },
     environment: {
       standardId: '', reference: null, temperatureStart: '', temperatureEnd: '',
       humidityStart: '', humidityEnd: '',

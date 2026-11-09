@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ActionButton, Badge, Card, ConfirmModal, Field, Heading } from '../../../components/ui';
+import { ActionButton, Badge, Card, CompactEntityCard, ConfirmModal, Field, Heading, SearchField } from '../../../components/ui';
 import { newAdminId } from '../../../core/admin-data';
 import { useAdminData } from '../hooks/useAdminData';
 import type { Customer } from '../../../core/admin-data';
@@ -9,6 +9,7 @@ import { ScreenPage } from '../../../components/ScreenPage';
 import { CustomerLocationFields } from '../components/CustomerLocationFields';
 import { StorageMessage } from '../components/StorageMessage';
 import { styles } from '../styles/AdminStyles';
+import { styles as customerStyles } from '../styles/CustomersScreenStyles';
 import type { Confirmation } from '../types/Confirmation';
 
 
@@ -31,7 +32,14 @@ export function CustomersScreen() {
   const data = useAdminData();
   const [editing, setEditing] = useState<Customer | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [search, setSearch] = useState('');
+  const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const locked = !data.loaded || Boolean(data.storageError);
+  const query = search.trim().toLowerCase();
+  const filteredCustomers = data.customers.filter((customer) => [
+    customer.name, customer.province, customer.city, customer.district, customer.village, customer.address,
+    ...customer.contacts.flatMap((contact) => [contact.name, contact.phone]),
+  ].join(' ').toLowerCase().includes(query));
   const save = () => {
     if (!editing?.name.trim() || !editing.province.trim() || !editing.city.trim() || !editing.district.trim() || !editing.village.trim() || !editing.address.trim()) {
       Alert.alert('Data belum lengkap', 'Isi nama rumah sakit dan alamat sampai kelurahan.'); return;
@@ -46,18 +54,38 @@ export function CustomersScreen() {
 
   return <ScreenPage title="Data pelanggan" hint="Kelola alamat rumah sakit dan satu atau beberapa PIC.">
     <StorageMessage message={data.storageError} />
-    <ActionButton title="＋ Tambah pelanggan" onPress={() => setEditing(blankCustomer())} disabled={locked} />
+    <View style={customerStyles.listHeader}>
+      <View><Text style={customerStyles.listTitle}>Daftar pelanggan</Text><Text style={customerStyles.listSubtitle}>{query ? `${filteredCustomers.length} dari ${data.customers.length} pelanggan` : 'Lokasi kalibrasi yang tersimpan'}</Text></View>
+      <View style={customerStyles.listCount}><Text style={customerStyles.listCountText}>{data.customers.length}</Text></View>
+    </View>
+    <SearchField accessibilityLabel="Cari pelanggan" value={search} onChange={(value) => { setSearch(value); setExpandedCustomerId(null); }} placeholder="Cari rumah sakit, lokasi, atau PIC" />
+    <View style={customerStyles.addAction}><ActionButton title="＋ Tambah pelanggan" onPress={() => setEditing(blankCustomer())} disabled={locked} /></View>
 
-    {data.customers.map((customer) => <Card key={customer.id} style={styles.entityCard}>
-      <View style={styles.entityHeader}>
-        <View style={[styles.entityAvatar, styles.customerAvatar]}><Text style={styles.entityAvatarText}>RS</Text></View>
-        <View style={styles.entityCopy}><Text style={styles.entityTitle}>{customer.name}</Text><Text style={styles.entitySubtitle}>{customer.city} · {customer.province}</Text></View>
-        {customer.isDemo ? <Badge text="Contoh" tone="wait" /> : null}
-      </View>
-      <View style={styles.addressBlock}><Text style={styles.blockLabel}>ALAMAT LOKASI</Text><Text style={styles.blockText}>{customer.address}</Text><Text style={styles.blockMeta}>{customer.district} · {customer.village}</Text></View>
-      <View style={styles.picList}>{customer.contacts.map((contact) => <View key={contact.id} style={styles.picChip}><Text style={styles.picName}>{contact.name}</Text><Text style={styles.picPhone}>{contact.phone}</Text></View>)}</View>
-      <View style={styles.actions}><ActionButton title="Ubah data" secondary onPress={() => setEditing({ ...customer, contacts: customer.contacts.map((contact) => ({ ...contact })) })} disabled={locked} /><ActionButton title="Hapus" danger onPress={() => remove(customer)} disabled={locked} /></View>
-    </Card>)}
+    {!filteredCustomers.length ? <Card style={customerStyles.emptyCard}>
+      <View style={customerStyles.emptyMark}><Text style={customerStyles.emptyMarkText}>RS</Text></View>
+      <Text style={customerStyles.emptyTitle}>{data.customers.length ? 'Pelanggan tidak ditemukan' : 'Belum ada pelanggan'}</Text>
+      <Text style={customerStyles.emptyHint}>{data.customers.length ? 'Coba kata kunci lain atau hapus pencarian.' : 'Tambahkan data rumah sakit dan PIC untuk mulai membuat pengerjaan kalibrasi.'}</Text>
+      {search ? <ActionButton title="Hapus pencarian" secondary onPress={() => setSearch('')} /> : null}
+    </Card> : filteredCustomers.map((customer) => {
+      const expanded = expandedCustomerId === customer.id;
+      return <CompactEntityCard key={customer.id} avatar="RS" title={customer.name} subtitle={`${customer.city} · ${customer.province}`} expanded={expanded} onPress={() => setExpandedCustomerId(expanded ? null : customer.id)}>
+          {customer.isDemo ? <Badge text="Data contoh" tone="wait" /> : null}
+          <View style={customerStyles.addressBlock}>
+            <Text style={customerStyles.sectionLabel}>ALAMAT LENGKAP</Text>
+            <Text style={customerStyles.addressText}>{customer.address}</Text>
+            <Text style={customerStyles.addressMeta}>{customer.village}, {customer.district} · {customer.city}, {customer.province}</Text>
+          </View>
+          <View style={customerStyles.contactsHeader}><Text style={customerStyles.contactsTitle}>Kontak PIC</Text><Text style={customerStyles.contactsCount}>{customer.contacts.length}</Text></View>
+          <View style={customerStyles.picList}>{customer.contacts.map((contact) => <View key={contact.id} style={customerStyles.picRow}>
+            <View style={customerStyles.picMark}><Text style={customerStyles.picMarkText}>{contact.name.trim().slice(0, 1).toUpperCase() || 'P'}</Text></View>
+            <View style={customerStyles.picCopy}><Text style={customerStyles.picName}>{contact.name}</Text><Text style={customerStyles.picPhone}>{contact.phone}</Text></View>
+          </View>)}</View>
+          <View style={[styles.actions, customerStyles.actions]}>
+            <View style={customerStyles.actionButton}><ActionButton title="Ubah data" secondary onPress={() => setEditing({ ...customer, contacts: customer.contacts.map((contact) => ({ ...contact })) })} disabled={locked} /></View>
+            <View style={customerStyles.actionButton}><ActionButton title="Hapus" danger onPress={() => remove(customer)} disabled={locked} /></View>
+          </View>
+      </CompactEntityCard>;
+    })}
     <Modal visible={Boolean(editing)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

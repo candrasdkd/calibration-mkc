@@ -65,8 +65,6 @@ const styles = StyleSheet.create({
   groupInstruction: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: 12 },
   groupCard: { padding: 0, overflow: 'hidden' },
   groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
-  groupToggle: { width: 31, height: 31, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F5F6' },
-  groupToggleText: { color: colors.primary, fontSize: 20, lineHeight: 22, fontWeight: '700' },
   serialList: { paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border },
   serialItem: { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   serialRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingHorizontal: 7 },
