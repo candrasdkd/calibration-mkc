@@ -13,7 +13,7 @@ import { calculateRecord } from '../../../core/calculations';
 import { getInstrumentTemplateId, getRecordInstrument } from '../../../core/instruments';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { useRecords } from '../../work-orders/hooks/useRecords';
-import type { Customer, MeasuringDevice, ThermohygrometerCertificate } from '../../../core/admin-data';
+import type { MeasuringDevice, ThermohygrometerCertificate } from '../../../core/admin-data';
 import { styles } from '../styles/CalibrationScreenStyles';
 import type { FieldUpdate, InspectionUpdate, PerformanceUpdate } from '../types/CalibrationForm';
 import type {
@@ -53,34 +53,12 @@ function StepTabs({ current, onChange }: { current: number; onChange: (step: num
   </View>;
 }
 
-function CustomerPicker({ customers, value, loaded, onChange }: { customers: Customer[]; value: string; loaded: boolean; onChange: (id: string) => void }) {
-  const [visible, setVisible] = useState(false);
-  const [search, setSearch] = useState('');
-  const selected = customers.find((customer) => customer.id === value);
-  const query = search.trim().toLowerCase();
-  const filtered = customers.filter((customer) => [customer.name, customer.city, customer.province].some((item) => item.toLowerCase().includes(query)));
-  const close = () => setVisible(false);
-
-  return <>
-    <PickerField label="Pelanggan *" value={selected ? `${selected.name} · ${selected.city}` : ''} placeholder="Pilih rumah sakit" disabled={!loaded || !customers.length} onPress={() => { setSearch(''); setVisible(true); }} />
-    <SearchPickerModal visible={visible} title="Pilih pelanggan" search={search} placeholder="Cari nama rumah sakit atau kota" onSearch={setSearch} onClose={close}>
-      {filtered.length ? <View style={styles.deviceGroup}>
-        <View style={styles.deviceGroupHeader}><View style={styles.deviceGroupCopy}><Text style={styles.deviceGroupName}>Daftar pelanggan</Text><Text style={styles.deviceGroupMeta}>{filtered.length} rumah sakit ditemukan</Text></View><Badge text={String(filtered.length)} /></View>
-        <View style={styles.deviceSerialList}>{filtered.map((customer, index) => {
-          const isSelected = customer.id === value;
-          return <PickerOption key={customer.id} index={index + 1} label={customer.name} detail={`${customer.city} · ${customer.province}`} selected={isSelected} status={isSelected ? 'Dipilih' : 'Pilih'} statusTone={isSelected ? 'good' : 'neutral'} accessibilityLabel={`${customer.name}, ${customer.city}, ${customer.province}`} onPress={() => { onChange(customer.id); close(); }} />;
-        })}</View>
-      </View> : <Text style={styles.devicePickerEmpty}>{query ? 'Tidak ada pelanggan yang cocok.' : 'Belum ada data pelanggan.'}</Text>}
-    </SearchPickerModal>
-  </>;
-}
-
-function IdentityStep({ data, instrument, customers, loaded, update, selectCustomer }: { data: CalibrationData; instrument: Instrument; customers: Customer[]; loaded: boolean; update: FieldUpdate; selectCustomer: (id: string) => void }) {
+function IdentityStep({ data, instrument, update }: { data: CalibrationData; instrument: Instrument; update: FieldUpdate }) {
   const fields: [keyof IdentityData, string][] = [
     ['labelNumber', 'Nomor label *'], ['brand', 'Merek *'],
     ['model', 'Tipe / model *'], ['serial', 'Nomor seri *'], ['capacity', 'Kapasitas'], ['accuracy', 'Tingkat ketelitian'],
     ['technician', 'Petugas pelaksana *'], ['receivedDate', 'Tanggal penerimaan'], ['testDate', 'Tanggal pelaksanaan *'],
-    ['room', 'Ruang pelaksanaan *'], ['method', 'Metode kerja *'],
+    ['room', 'Ruang pelaksanaan *'],
   ];
   const characteristicUnit = instrument.weighingScale ? 'kg' : instrument.sphygmomanometer ? 'mmHg' : undefined;
   return <>
@@ -95,13 +73,25 @@ function IdentityStep({ data, instrument, customers, loaded, update, selectCusto
       })}
       {characteristicUnit ? <Text style={styles.deviceHint}>Isi sesuai label alat. Tingkat ketelitian dipakai dalam perhitungan; kapasitas dicantumkan di LK dan sertifikat.</Text> : null}
     </Card>
-    <Card><Heading title="Pelaksanaan dan pelanggan" hint="Pilih pelanggan yang sudah didaftarkan admin. Ketuk tanggal untuk membuka kalender." />
-      {!loaded ? <Text style={styles.deviceHint}>Memuat data pelanggan…</Text> : customers.length ? <CustomerPicker customers={customers} value={data.identity.customerId || customers.find((customer) => customer.name === data.identity.customer)?.id || ''} loaded={loaded} onChange={selectCustomer} /> : <Text style={styles.errorText}>Belum ada data pelanggan. Admin perlu menambahkan pelanggan terlebih dahulu.</Text>}
-      {data.identity.customer ? <><ValueLine label="Alamat pelanggan" value={data.identity.address} /><ValueLine label="Kota / kabupaten" value={data.identity.city} /></> : null}
+    <Card><Heading title="Pelaksanaan" hint="Pelanggan ditetapkan saat pekerjaan dibuat dan terkunci selama pengerjaan." />
+      {data.identity.customer ? <View style={styles.customerSummary}>
+        <View style={styles.customerSummaryHeader}>
+          <View style={styles.customerMark}><Text style={styles.customerMarkText}>RS</Text></View>
+          <View style={styles.customerSummaryCopy}>
+            <Text style={styles.customerSummaryName}>{data.identity.customer}</Text>
+            <Text style={styles.customerSummaryLocation}>{data.identity.city}</Text>
+          </View>
+          <Badge text="TERKUNCI" tone="good" />
+        </View>
+        <View style={styles.customerAddress}>
+          <Text style={styles.customerAddressLabel}>ALAMAT PELANGGAN</Text>
+          <Text style={styles.customerAddressValue}>{data.identity.address || 'Alamat belum tersedia'}</Text>
+        </View>
+      </View> : <Text style={styles.customerMissing}>Pelanggan belum tersimpan pada pekerjaan ini. Buat pekerjaan baru dari pilihan pelanggan dan alat agar identitas pelanggan tercatat.</Text>}
+      <Text style={styles.dateHint}>Ketuk kolom tanggal untuk membuka kalender.</Text>
       {fields.slice(6).map(([key, label]) => key.endsWith('Date')
         ? <DateField key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />
-        : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} editable={key !== 'method'} multiline={key === 'method'} />)}
-      <Text style={styles.deviceHint}>Metode kerja dikelola admin di menu Katalog Alkes.</Text>
+        : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
     </Card>
   </>;
 }
@@ -819,18 +809,6 @@ export default function CalibrationScreen() {
   const updateEquipmentPhoto = (side: keyof EquipmentPhotos, uri: string) => updateRecord(record.id, {
     data: { ...data, equipmentPhotos: { front: '', back: '', left: '', right: '', ...data.equipmentPhotos, [side]: uri } },
   });
-  const selectCustomer = (customerId: string) => {
-    const customer = customers.find((item) => item.id === customerId);
-    updateRecord(record.id, {
-      data: {
-        ...data, identity: {
-          ...data.identity,
-          customerId: customer?.id ?? '', customer: customer?.name ?? '',
-          address: customer?.address ?? '', city: customer ? `${customer.city}, ${customer.province}` : '',
-        }
-      }
-    });
-  };
   const toggleDevice = (device: SelectedMeasurementDevice, profile: Thermohygrometer | null) => {
     const current = data.selectedDevices ?? [];
     const removing = current.some((item) => item.id === device.id);
@@ -896,7 +874,7 @@ export default function CalibrationScreen() {
     {storageError ? <View style={styles.storageMessage}><Text style={styles.storageMessageText}>{storageError}</Text></View> : null}
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {step === 0 ? <IdentityStep data={data} instrument={instrument} customers={customers} loaded={directoryLoaded} update={update} selectCustomer={selectCustomer} /> : null}
+        {step === 0 ? <IdentityStep data={data} instrument={instrument} update={update} /> : null}
         {step === 1 ? <EquipmentPhotoStep photos={data.equipmentPhotos} onChange={updateEquipmentPhoto} /> : null}
         {step === 2 ? <SelectDevicesStep instrument={instrument} data={data} devices={devices} loaded={directoryLoaded} onToggle={toggleDevice} onReference={selectThermohygrometer} onToggleWeights={updateWeighingWeights} /> : null}
         {step === 3 ? <MeasurementStep data={data} instrument={instrument} result={result} update={update} updateInspection={updateInspection} updatePerformance={updatePerformance} updateWeighingPoint={updateWeighingPoint} updateWeighingRepeatability={updateWeighingRepeatability} updateSphygmomanometer={updateSphygmomanometer} updateInfusionPump={updateInfusionPump} updateSuctionPump={updateSuctionPump} /> : null}
