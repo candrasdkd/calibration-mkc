@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import { createInitialData, getInstrument } from './instruments';
+import type { Customer } from './admin-data';
 import type { CalibrationRecord } from './types';
 
 const STORAGE_KEY = 'kalibrasi-mobile-records-v1';
@@ -8,7 +9,7 @@ export type RecordsContextValue = {
   records: CalibrationRecord[];
   loaded: boolean;
   storageError: string;
-  createRecord: (instrumentId: string, method: string) => string | null;
+  createRecord: (instrumentId: string, method: string, customer?: Pick<Customer, 'id' | 'name' | 'address' | 'city' | 'province'>) => string | null;
   updateRecord: (id: string, update: Partial<Pick<CalibrationRecord, 'data'>>) => void;
   deleteRecord: (id: string) => void;
 };
@@ -62,11 +63,20 @@ export function RecordsProvider({ children }: PropsWithChildren) {
     records,
     loaded,
     storageError,
-    createRecord(instrumentId, method) {
+    createRecord(instrumentId, method, customer) {
       if (!getInstrument(instrumentId) || !method.trim()) return null;
       const now = new Date().toISOString();
       const data = createInitialData(instrumentId);
-      data.identity.method = method.trim();
+      data.identity = {
+        ...data.identity,
+        method: method.trim(),
+        ...(customer ? {
+          customerId: customer.id,
+          customer: customer.name,
+          address: customer.address,
+          city: `${customer.city}, ${customer.province}`,
+        } : {}),
+      };
       const record = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         instrumentId,

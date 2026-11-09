@@ -122,7 +122,7 @@ export function DevicesScreen() {
           {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
             <Card>
               <Field label="Nama jenis standar" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
-              <Text style={styles.groupInstruction}>Samakan nama ini dengan jenis standar yang diminta di Katalog kalibrasi, misalnya Thermohygrometer atau Tachometer.</Text>
+              <Text style={styles.groupInstruction}>Samakan nama ini dengan jenis standar yang diminta di Katalog Alkes, misalnya Thermohygrometer atau Tachometer.</Text>
               <Field label="Merek" value={editing.brand} onChange={(brand) => setEditing({ ...editing, brand })} />
               <Field label="Tipe / model" value={editing.model} onChange={(model) => setEditing({ ...editing, model })} />
               <Field label="Nomor seri" value={editing.serial} onChange={(serial) => setEditing({ ...editing, serial })} />

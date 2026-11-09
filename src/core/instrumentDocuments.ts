@@ -4,6 +4,7 @@ import { mkcLogo } from './mkcLogo';
 const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const html = (value: unknown) => String(value ?? '—').replace(/[&<>"']/g, (character) => entities[character] ?? character);
 const fixed = (value: number | null | undefined, digits = 2) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
+const accuracyValue = (value: string) => value.replace(/^kelas\s*/i, '').trim();
 const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 function date(value: string) {
@@ -47,10 +48,10 @@ function header(instrument: Instrument, record: CalibrationRecord, title: string
 function identityTable(record: CalibrationRecord, instrument: Instrument) {
   const { identity } = record.data;
   const capacity = identity.capacity ? `${identity.capacity} ${capacityUnit(instrument)}` : '—';
-  const accuracy = identity.accuracy ? `${identity.accuracy}${instrument.sphygmomanometer ? '' : ` ${capacityUnit(instrument)}`}` : '—';
+  const accuracy = accuracyValue(identity.accuracy) ? `${accuracyValue(identity.accuracy)} ${capacityUnit(instrument)}` : '—';
   const entries: [string, unknown][] = [
     ['Nama alat', instrument.name], ['Merek', identity.brand], ['Tipe / model', identity.model], ['Nomor seri', identity.serial],
-    ['Kapasitas', capacity], ['Ketelitian / kelas', accuracy], ['Pelanggan', identity.customer],
+    ['Kapasitas', capacity], ['Tingkat ketelitian', accuracy], ['Pelanggan', identity.customer],
     ['Alamat', [identity.address, identity.city].filter(Boolean).join(', ')], ['Ruang pelaksanaan', identity.room],
     ['Petugas pelaksana', identity.technician], ['Tanggal penerimaan', date(identity.receivedDate)], ['Tanggal pelaksanaan', date(identity.testDate)],
     ['Metode kerja', identity.method],
@@ -81,7 +82,7 @@ function standardsTable(record: CalibrationRecord, instrument: Instrument, inclu
 function workbookIdentityTable(record: CalibrationRecord, instrument: Instrument) {
   const { identity } = record.data;
   const capacity = identity.capacity ? `${identity.capacity} ${capacityUnit(instrument)}` : '—';
-  const accuracy = identity.accuracy ? `${identity.accuracy}${instrument.sphygmomanometer ? '' : ` ${capacityUnit(instrument)}`}` : '—';
+  const accuracy = accuracyValue(identity.accuracy) ? `${accuracyValue(identity.accuracy)} ${capacityUnit(instrument)}` : '—';
   const entries: [string, unknown][] = [
     ['Milik', identity.customer], ['Merk', identity.brand], ['Tipe / Model', identity.model], ['Nomer Seri', identity.serial],
     [instrument.weighingScale ? 'Kapasitas Maksimum' : 'Kapasitas', capacity], ['Tingkat Ketelitian', accuracy],
@@ -296,7 +297,7 @@ function pumpReport(record: CalibrationRecord, instrument: Instrument, result: C
 function workbookCertificate(record: CalibrationRecord, instrument: Instrument, result: CalculationResult) {
   const identity = record.data.identity;
   const capacity = identity.capacity ? `${identity.capacity} ${capacityUnit(instrument)}` : '—';
-  const accuracy = identity.accuracy ? `${identity.accuracy}${instrument.sphygmomanometer ? '' : ` ${capacityUnit(instrument)}`}` : '—';
+  const accuracy = accuracyValue(identity.accuracy) ? `${accuracyValue(identity.accuracy)} ${capacityUnit(instrument)}` : '—';
   const fields = (rows: [string, string, string][]) => rows.map(([label, translation, value]) => `<div class="field"><div class="label">${html(label)}<i>${html(translation)}</i></div><div>:</div><div>${html(value)}</div></div>`).join('');
   const equipment = fields([
     ['Nama Alat', 'Name of Equipment', instrument.name], ['Merk', 'Manufacturer', identity.brand],
@@ -322,10 +323,10 @@ function certificate(record: CalibrationRecord, instrument: Instrument, result: 
   }
   const identity = record.data.identity;
   const capacity = identity.capacity ? `${identity.capacity} ${capacityUnit(instrument)}` : '—';
-  const accuracy = identity.accuracy ? `${identity.accuracy}${instrument.sphygmomanometer ? '' : ` ${capacityUnit(instrument)}`}` : '—';
+  const accuracy = accuracyValue(identity.accuracy) ? `${accuracyValue(identity.accuracy)} ${capacityUnit(instrument)}` : '—';
   const details: [string, unknown][] = [
     ['Nama alat', instrument.name], ['Merek', identity.brand], ['Tipe / model', identity.model], ['Nomor seri', identity.serial],
-    ['Kapasitas', capacity], ['Ketelitian / kelas', accuracy], ['Nama pemilik', identity.customer], ['Alamat', [identity.address, identity.city].filter(Boolean).join(', ')],
+    ['Kapasitas', capacity], ['Tingkat ketelitian', accuracy], ['Nama pemilik', identity.customer], ['Alamat', [identity.address, identity.city].filter(Boolean).join(', ')],
     ['Tanggal penerimaan', date(identity.receivedDate)], ['Tanggal pelaksanaan', date(identity.testDate)], ['Penanggung jawab pengujian', identity.technician], ['Metode kalibrasi', identity.method],
   ];
   return `<!doctype html><html><head><meta charset="utf-8"><style>

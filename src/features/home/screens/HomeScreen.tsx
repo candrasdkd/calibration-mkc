@@ -14,7 +14,7 @@ const adminMenus = [
   { path: '/admin/customers', title: 'Pelanggan', subtitle: 'Rumah sakit dan PIC', countKey: 'customers' },
   { path: '/admin/devices', title: 'Standar kalibrasi', subtitle: 'Alat ukur dan sertifikat', countKey: 'devices' },
   { path: '/admin/technicians', title: 'Teknisi', subtitle: 'Petugas pelaksana', countKey: 'technicians' },
-  { path: '/admin/instruments', title: 'Katalog kalibrasi', subtitle: 'Jenis alat & metode kerja', countKey: 'equipmentMethods' },
+  { path: '/admin/instruments', title: 'Katalog Alkes', subtitle: 'Jenis alat & metode kerja', countKey: 'equipmentMethods' },
 ] as const;
 
 export default function HomeScreen() {

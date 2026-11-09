@@ -2,6 +2,20 @@ import { StyleSheet } from 'react-native';
 import { colors } from '../../../core/theme';
 
 export const styles = StyleSheet.create({
+  groupCard: { padding: 0, overflow: 'hidden' },
+  groupHeader: { minHeight: 104, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 15 },
+  groupCopy: { flex: 1 },
+  groupCustomer: { color: colors.ink, fontSize: 15, lineHeight: 20, fontWeight: '900', marginTop: 3 },
+  groupDate: { color: colors.muted, fontSize: 11, fontWeight: '700', marginTop: 5 },
+  groupSummary: { color: colors.primary, fontSize: 11, fontWeight: '900', marginTop: 8 },
+  groupHeaderAction: { alignItems: 'flex-end', gap: 5 },
+  groupRows: { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 1, borderColor: colors.border },
+  groupItem: { paddingTop: 14, marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  groupItemMain: { paddingBottom: 2 },
+  groupItemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  groupItemName: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 18, fontWeight: '900' },
+  groupItemDetails: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 6 },
+  groupItemActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   recordCard: { padding: 15 },
   recordMain: { paddingBottom: 13 },
   recordTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },

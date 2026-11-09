@@ -29,6 +29,10 @@ const number = (value: unknown): number | null => {
   const parsed = Number(String(value).replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : null;
 };
+const positiveIdentityNumber = (value: string) => {
+  const parsed = number(value.replace(/^kelas\s*/i, ''));
+  return parsed !== null && parsed > 0 ? parsed : null;
+};
 
 const average = (values: number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
 
@@ -449,16 +453,23 @@ function calculateSafety(safety: SafetyData): SafetyResult {
 }
 
 export function calculateRecord(instrument: Instrument, data: CalibrationData): CalculationResult {
+  const capacity = positiveIdentityNumber(data.identity.capacity);
+  const accuracy = positiveIdentityNumber(data.identity.accuracy);
+  const calculationInstrument = instrument.weighingScale
+    ? { ...instrument, weighingScale: { ...instrument.weighingScale, resolutionKg: accuracy ?? instrument.weighingScale.resolutionKg } }
+    : instrument.sphygmomanometer
+      ? { ...instrument, sphygmomanometer: { ...instrument.sphygmomanometer, accuracyClass: accuracy ?? instrument.sphygmomanometer.accuracyClass } }
+      : instrument;
   const environment = calculateEnvironment(data);
-  const weighing = calculateWeighing(instrument, data.weighing);
+  const weighing = calculateWeighing(calculationInstrument, data.weighing);
   const dpmSerial = instrument.standards.find(([name]) => name.toLowerCase() === 'digital pressure meter')?.[3];
   const selectedDpm = data.selectedDevices?.find((device) => device.name.toLowerCase() === 'digital pressure meter');
   const dpmStandardValid = data.selectedDevices === undefined || selectedDpm?.serial === dpmSerial;
   const pumpAnalyzerSerial = instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3];
   const selectedPumpAnalyzer = data.selectedDevices?.find((device) => device.name === 'Infusion Device Analyzer');
   const pumpAnalyzerValid = data.selectedDevices === undefined || selectedPumpAnalyzer?.serial === pumpAnalyzerSerial;
-  const sphygmomanometer = instrument.sphygmomanometer
-    ? calculateSphygmomanometer(instrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid)
+  const sphygmomanometer = calculationInstrument.sphygmomanometer
+    ? calculateSphygmomanometer(calculationInstrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid)
     : null;
   const performance = data.performance.map((row) => ({
     ...row,
@@ -520,6 +531,10 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
 
   const missing = [];
   const identity = data.identity;
+  if (instrument.weighingScale || instrument.sphygmomanometer) {
+    if (capacity === null) missing.push('Kapasitas harus berupa angka lebih dari 0');
+    if (accuracy === null) missing.push('Tingkat ketelitian harus berupa angka lebih dari 0');
+  }
   for (const [key, label] of [
     ['labelNumber', 'Nomor label'], ['brand', 'Merek'], ['model', 'Tipe/model'],
     ['serial', 'Nomor seri'], ['technician', 'Petugas'], ['testDate', 'Tanggal pelaksanaan'],

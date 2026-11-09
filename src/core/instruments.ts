@@ -257,7 +257,7 @@ export function createInitialData(instrumentId: string): CalibrationData {
     identity: {
       customerId: '', documentNumber: '', orderNumber: '', labelNumber: '', brand: '', model: '', serial: '',
       capacity: instrument.weighingScale ? String(instrument.weighingScale.capacityKg) : instrument.sphygmomanometer ? String(instrument.sphygmomanometer.capacityMmHg) : '',
-      accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : instrument.sphygmomanometer ? `Kelas ${instrument.sphygmomanometer.accuracyClass}` : '',
+      accuracy: instrument.weighingScale ? String(instrument.weighingScale.resolutionKg) : instrument.sphygmomanometer ? String(instrument.sphygmomanometer.accuracyClass) : '',
       technician: '', receivedDate: today, testDate: today, issueDate: '', room: '', customer: '', address: '', city: '', method: '',
     },
     environment: {

@@ -152,7 +152,7 @@ function FormulaCard({
           <Text style={styles.formulaGroupTitle}>Alur dan batas pengujian</Text>
           <FormulaStep number="1" title="Kebocoran" equation="Pompa 250 mmHg; ukur penurunan setelah 1 menit" detail="Batas pada rumus yang dipakai aplikasi: ≤ 15 mmHg." />
           <FormulaStep number="2" title="Deflasi cepat" equation="Pompa 260 mmHg; ukur waktu deflasi" detail="Batas waktu: ≤ 10 detik." />
-          <FormulaStep number="3" title="Ketepatan tekanan" equation={`Setting ${instrument.sphygmomanometer.pressurePoints.join(', ')} mmHg · 3 bacaan DPM saat tekanan naik dan turun`} detail={`Sphygmomanometer ${instrument.sphygmomanometer.accuracyClass === 1 ? 'digital' : 'analog'} · kelas akurasi ${instrument.sphygmomanometer.accuracyClass}.`} />
+          <FormulaStep number="3" title="Ketepatan tekanan" equation={`Setting ${instrument.sphygmomanometer.pressurePoints.join(', ')} mmHg · 3 bacaan DPM saat tekanan naik dan turun`} detail={`Sphygmomanometer ${instrument.sphygmomanometer.accuracyClass === 1 ? 'digital' : 'analog'} · tingkat ketelitian ${instrument.sphygmomanometer.accuracyClass} mmHg.`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
@@ -163,7 +163,7 @@ function FormulaCard({
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi, U95, dan keputusan</Text>
           <FormulaStep number="1" title="Rata-rata dan koreksi" equation="x̄ = Σxi terkoreksi / 3; C = setting − x̄" detail="Simpangan baku s dihitung dari tiga bacaan DPM yang sudah dikoreksi." />
-          <FormulaStep number="2" title="Komponen ketidakpastian" equation={`u resolusi = (0,5 × kelas akurasi) / √6; u ulang = s / √3; u drift = drift / √3; u DPM = U95 sertifikat / 2`} detail="Nilai drift mengikuti tabel pada workbook dan arah tekanan." />
+          <FormulaStep number="2" title="Komponen ketidakpastian" equation={`u resolusi = (0,5 × tingkat ketelitian) / √6; u ulang = s / √3; u drift = drift / √3; u DPM = U95 sertifikat / 2`} detail="Nilai drift mengikuti tabel pada workbook dan arah tekanan." />
           <FormulaStep number="3" title="U95 dan kelulusan" equation="uc = √Σui²; νeff = uc⁴ / Σ(ui⁴ / νi); U95 = max[t(0,975; νeff) × uc, 0,99 mmHg]" detail="Satu arah lulus jika |C| + U95 ≤ 4 mmHg." />
           {instrument.sphygmomanometer.drift.map((point) => <ValueLine key={point.pressure} label={`Drift ${point.pressure} mmHg`} value={`Naik ${point.up} · Turun ${point.down} mmHg`} />)}
         </View>
@@ -197,7 +197,7 @@ function FormulaCard({
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Parameter alat</Text>
           <ValueLine label="Kapasitas" value={`${instrument.weighingScale.capacityKg} kg`} />
-          <ValueLine label="Resolusi d" value={`${instrument.weighingScale.resolutionKg} kg`} />
+          <ValueLine label="Tingkat ketelitian d" value={`${instrument.weighingScale.resolutionKg} kg`} />
           <ValueLine label="Pembagi u resolusi" value={`√${instrument.weighingScale.resolutionDivisor}`} />
         </View>
       </> : <>

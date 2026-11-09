@@ -79,17 +79,18 @@ function IdentityStep({ data, instrument, customers, loaded, update, selectCusto
     ['technician', 'Petugas pelaksana *'], ['receivedDate', 'Tanggal penerimaan'], ['testDate', 'Tanggal pelaksanaan *'],
     ['room', 'Ruang pelaksanaan *'], ['method', 'Metode kerja *'],
   ];
+  const characteristicUnit = instrument.weighingScale ? 'kg' : instrument.sphygmomanometer ? 'mmHg' : undefined;
   return <>
-    <Card><Heading title="Alat yang dikalibrasi" hint="Isi identitas alat kesehatan yang diuji. Metode kerja otomatis mengikuti katalog kalibrasi." />
-      {fields.slice(0, instrument.weighingScale || instrument.sphygmomanometer ? 4 : 6).map(([key, label]) => <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
-      {instrument.weighingScale ? <>
-        <ValueLine label="Kapasitas" value={`${instrument.weighingScale.capacityKg} kg`} />
-        <ValueLine label="Tingkat ketelitian" value={`${instrument.weighingScale.resolutionKg} kg`} />
-      </> : null}
-      {instrument.sphygmomanometer ? <>
-        <ValueLine label="Kapasitas" value={`${instrument.sphygmomanometer.capacityMmHg} mmHg`} />
-        <ValueLine label="Kelas akurasi" value={`${instrument.sphygmomanometer.accuracyClass}`} />
-      </> : null}
+    <Card><Heading title="Alat yang dikalibrasi" hint="Isi identitas alat kesehatan yang diuji. Metode kerja otomatis mengikuti Katalog Alkes." />
+      {fields.slice(0, 6).map(([key, label]) => {
+        const characteristic = key === 'capacity' || key === 'accuracy';
+        const value = key === 'accuracy' && instrument.sphygmomanometer
+          ? data.identity.accuracy.replace(/^kelas\s*/i, '')
+          : data.identity[key];
+        return <Field key={key} label={label} value={value} onChange={(next) => update('identity', key, next)}
+          keyboard={characteristic ? 'decimal-pad' : undefined} suffix={characteristic ? characteristicUnit : undefined} />;
+      })}
+      {characteristicUnit ? <Text style={styles.deviceHint}>Isi sesuai label alat. Tingkat ketelitian dipakai dalam perhitungan; kapasitas dicantumkan di LK dan sertifikat.</Text> : null}
     </Card>
     <Card><Heading title="Pelaksanaan dan pelanggan" hint="Pilih pelanggan yang sudah didaftarkan admin. Ketuk tanggal untuk membuka kalender." />
       {!loaded ? <Text style={styles.deviceHint}>Memuat data pelanggan…</Text> : customers.length ? <CustomerPicker customers={customers} value={data.identity.customerId || customers.find((customer) => customer.name === data.identity.customer)?.id || ''} loaded={loaded} onChange={selectCustomer} /> : <Text style={styles.errorText}>Belum ada data pelanggan. Admin perlu menambahkan pelanggan terlebih dahulu.</Text>}
@@ -97,7 +98,7 @@ function IdentityStep({ data, instrument, customers, loaded, update, selectCusto
       {fields.slice(6).map(([key, label]) => key.endsWith('Date')
         ? <DateField key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />
         : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} editable={key !== 'method'} multiline={key === 'method'} />)}
-      <Text style={styles.deviceHint}>Metode kerja dikelola admin di menu Katalog kalibrasi.</Text>
+      <Text style={styles.deviceHint}>Metode kerja dikelola admin di menu Katalog Alkes.</Text>
     </Card>
   </>;
 }
