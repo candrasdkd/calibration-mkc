@@ -1,15 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
-import { createInitialData, getInstrument } from './instruments';
+import { createInitialData, getInstrument, getInstrumentTemplateId } from './instruments';
 import type { Customer } from './admin-data';
-import type { CalibrationRecord } from './types';
+import type { CalibrationRecord, Instrument } from './types';
 
 const STORAGE_KEY = 'kalibrasi-mobile-records-v1';
 export type RecordsContextValue = {
   records: CalibrationRecord[];
   loaded: boolean;
   storageError: string;
-  createRecord: (instrumentId: string, method: string, customer?: Pick<Customer, 'id' | 'name' | 'address' | 'city' | 'province'>) => string | null;
+  createRecord: (instrument: Instrument, method: string, customer?: Pick<Customer, 'id' | 'name' | 'address' | 'city' | 'province'>) => string | null;
   updateRecord: (id: string, update: Partial<Pick<CalibrationRecord, 'data'>>) => void;
   deleteRecord: (id: string) => void;
 };
@@ -63,10 +63,10 @@ export function RecordsProvider({ children }: PropsWithChildren) {
     records,
     loaded,
     storageError,
-    createRecord(instrumentId, method, customer) {
-      if (!getInstrument(instrumentId) || !method.trim()) return null;
+    createRecord(instrument, method, customer) {
+      if (!getInstrument(getInstrumentTemplateId(instrument)) || !instrument.name.trim() || !method.trim()) return null;
       const now = new Date().toISOString();
-      const data = createInitialData(instrumentId);
+      const data = createInitialData(getInstrumentTemplateId(instrument));
       data.identity = {
         ...data.identity,
         method: method.trim(),
@@ -79,7 +79,8 @@ export function RecordsProvider({ children }: PropsWithChildren) {
       };
       const record = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        instrumentId,
+        instrumentId: instrument.id,
+        instrumentSnapshot: instrument,
         createdAt: now,
         updatedAt: now,
         data,

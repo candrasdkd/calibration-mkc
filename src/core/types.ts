@@ -111,6 +111,7 @@ export type Standard = [name: string, brand: string, model: string, serial: stri
 
 export interface Instrument {
   id: string;
+  templateId?: string;
   name: string;
   subtitle: string;
   standards: Standard[];
@@ -121,6 +122,14 @@ export interface Instrument {
   weighingScale?: WeighingScaleConfig;
   sphygmomanometer?: SphygmomanometerConfig;
   suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number; maximumVacuumMmHg: number };
+}
+
+export interface CustomEquipment {
+  id: string;
+  templateId: string;
+  name: string;
+  method: string;
+  standardNames: string[];
 }
 
 export interface IdentityData {
@@ -222,6 +231,7 @@ export interface SelectedMeasurementDevice {
 export interface CalibrationRecord {
   id: string;
   instrumentId: string;
+  instrumentSnapshot?: Instrument;
   createdAt: string;
   updatedAt: string;
   isDemo?: boolean;

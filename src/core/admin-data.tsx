@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import { instruments, thermohygrometers } from './instruments';
 import { adultScaleStandardWeights } from './weighingScales';
-import type { Thermohygrometer } from './types';
+import type { CustomEquipment, Thermohygrometer } from './types';
 
 export interface ContactPerson { id: string; name: string; phone: string }
 export interface Customer { id: string; name: string; province: string; provinceId?: string; city: string; cityId?: string; district: string; districtId?: string; village: string; villageId?: string; address: string; contacts: ContactPerson[]; isDemo: boolean }
@@ -12,7 +12,7 @@ export interface WeighingStandardCalibration { nominalKg: string; uncertaintyU95
 export interface MeasuringDevice { id: string; name: string; brand: string; model: string; serial: string; isThermohygrometer: boolean; certificate: ThermohygrometerCertificate | null; weighingStandard?: WeighingStandardCalibration | null; isDemo: boolean }
 export interface TechnicianProfile { id: string; name: string; phone: string; isDemo: boolean }
 export interface EquipmentMethod { instrumentId: string; method: string }
-type AdminDirectory = { customers: Customer[]; devices: MeasuringDevice[]; technicians: TechnicianProfile[]; equipmentMethods: EquipmentMethod[]; seedVersion: number };
+type AdminDirectory = { customers: Customer[]; devices: MeasuringDevice[]; technicians: TechnicianProfile[]; equipmentMethods: EquipmentMethod[]; customEquipment: CustomEquipment[]; seedVersion: number };
 
 const STORAGE_KEY = 'kalibrasi-admin-directory-v1';
 const certificateFrom = (reference: Thermohygrometer): ThermohygrometerCertificate => ({
@@ -49,6 +49,7 @@ const demoDirectory: AdminDirectory = {
     { id: 'demo-technician-2', name: 'Rafi Teknisi Demo', phone: '0812-0000-0012', isDemo: true },
   ],
   equipmentMethods: [],
+  customEquipment: [],
   seedVersion: 6,
 };
 
@@ -63,6 +64,8 @@ export type AdminDataContextValue = AdminDirectory & {
   deleteTechnician: (id: string) => void;
   saveEquipmentMethod: (entry: EquipmentMethod) => void;
   deleteEquipmentMethod: (instrumentId: string) => void;
+  saveCustomEquipment: (entry: CustomEquipment) => void;
+  deleteCustomEquipment: (id: string) => void;
 };
 
 export const AdminDataContext = createContext<AdminDataContextValue | null>(null);
@@ -123,6 +126,9 @@ function parseDirectory(value: unknown): AdminDirectory {
     equipmentMethods: Array.isArray(directory.equipmentMethods)
       ? directory.equipmentMethods.filter((entry): entry is EquipmentMethod => Boolean(entry && typeof entry.instrumentId === 'string' && typeof entry.method === 'string' && instruments.some((instrument) => instrument.id === entry.instrumentId)))
       : [],
+    customEquipment: Array.isArray(directory.customEquipment)
+      ? directory.customEquipment.filter((entry): entry is CustomEquipment => Boolean(entry && typeof entry.id === 'string' && entry.id && typeof entry.templateId === 'string' && instruments.some((instrument) => instrument.id === entry.templateId) && typeof entry.name === 'string' && entry.name.trim() && typeof entry.method === 'string' && entry.method.trim() && Array.isArray(entry.standardNames) && entry.standardNames.every((name) => typeof name === 'string')))
+      : [],
     seedVersion: 6,
   };
 }
@@ -165,6 +171,8 @@ export function AdminDataProvider({ children }: PropsWithChildren) {
     deleteTechnician: (id) => setDirectory((current) => ({ ...current, technicians: current.technicians.filter((item) => item.id !== id) })),
     saveEquipmentMethod: (entry) => setDirectory((current) => ({ ...current, equipmentMethods: [...current.equipmentMethods.filter((item) => item.instrumentId !== entry.instrumentId), entry] })),
     deleteEquipmentMethod: (instrumentId) => setDirectory((current) => ({ ...current, equipmentMethods: current.equipmentMethods.filter((item) => item.instrumentId !== instrumentId) })),
+    saveCustomEquipment: (entry) => setDirectory((current) => ({ ...current, customEquipment: [...current.customEquipment.filter((item) => item.id !== entry.id), entry] })),
+    deleteCustomEquipment: (id) => setDirectory((current) => ({ ...current, customEquipment: current.customEquipment.filter((item) => item.id !== id) })),
   }), [directory, loaded, storageError]);
 
   return <AdminDataContext.Provider value={value}>{children}</AdminDataContext.Provider>;

@@ -7,7 +7,7 @@ import { PickerOption } from '../../../components/picker/PickerOption';
 import { SearchPickerModal } from '../../../components/picker/SearchPickerModal';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { calculateRecord } from '../../../core/calculations';
-import { getInstrument, instruments } from '../../../core/instruments';
+import { getCustomEquipmentInstrument, getRecordInstrument, instruments } from '../../../core/instruments';
 import type { Customer } from '../../../core/admin-data';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { useRecords } from '../hooks/useRecords';
@@ -30,7 +30,10 @@ export function FormScreen() {
   const availableInstruments = instruments.flatMap((instrument) => {
     const method = directory.equipmentMethods.find((item) => item.instrumentId === instrument.id)?.method.trim();
     return method ? [{ instrument, method }] : [];
-  });
+  }).concat(directory.customEquipment.flatMap((entry) => {
+    const instrument = getCustomEquipmentInstrument(entry);
+    return instrument ? [{ instrument, method: entry.method }] : [];
+  }));
   const customer = directory.customers.find((item) => item.id === customerId);
   const selectedInstruments = selectedInstrumentIds.flatMap((id) => availableInstruments.filter(({ instrument }) => instrument.id === id));
   const filteredCustomers = directory.customers.filter((item) =>
@@ -49,7 +52,7 @@ export function FormScreen() {
     }>();
     for (const record of records) {
       if (record.isDemo) continue;
-      const instrument = getInstrument(record.instrumentId);
+      const instrument = getRecordInstrument(record);
       if (!instrument || calculateRecord(instrument, record.data).complete) continue;
       const identity = record.data.identity;
       const name = identity.customer || 'Pelanggan belum dipilih';
@@ -82,7 +85,7 @@ export function FormScreen() {
     if (blocked || !customer || !selectedInstrumentIds.length) return;
     const created = [...selectedInstrumentIds].reverse()
       .flatMap((id) => availableInstruments.filter(({ instrument }) => instrument.id === id))
-      .map(({ instrument, method }) => createRecord(instrument.id, method, customer))
+      .map(({ instrument, method }) => createRecord(instrument, method, customer))
       .filter((id): id is string => Boolean(id));
     if (created.length) {
       setSelectedInstrumentIds([]);

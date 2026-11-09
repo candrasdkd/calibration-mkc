@@ -3,7 +3,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { Badge, Card, Field, Heading, ValueLine } from '../../../components/ui';
 import { ScreenPage } from '../../../components/ScreenPage';
-import { getInstrument, instruments } from '../../../core/instruments';
+import { getInstrumentTemplateId, getRecordInstrument, instruments } from '../../../core/instruments';
 import { useRecords } from '../../work-orders/hooks/useRecords';
 import { styles } from '../styles/FormulasScreenStyles';
 
@@ -77,8 +77,9 @@ function FormulaCard({
   const formulaRows = instrument.performanceRows.filter((row, index, rows) => rows.findIndex((item) => item.formula === row.formula) === index);
   const isActiveWork = Boolean(activeReferences && onReferenceChange);
   const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
-  const occlusionLimit = instrument.id === 'syringe-pump' ? 21 : 20;
-  const methodSource = ['centrifuge', 'fetal-doppler', 'flowmeter', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.id)
+  const templateId = getInstrumentTemplateId(instrument);
+  const occlusionLimit = templateId === 'syringe-pump' ? 21 : 20;
+  const methodSource = ['centrifuge', 'fetal-doppler', 'flowmeter', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId)
     ? { label: 'Metode Kerja Kemenkes 2024 · MK-24 (draf)', tone: 'wait' as const }
     : instrument.sphygmomanometer
       ? { label: 'Excel 2026 · metode Kemenkes belum dikonfirmasi', tone: 'wait' as const }
@@ -89,7 +90,7 @@ function FormulaCard({
     ? `${instrument.sphygmomanometer.pressurePoints.length} titik tekanan · 3 bacaan per arah`
     : instrument.suctionPump
       ? `${instrument.suctionPump.pressurePoints.length} titik vakum · 6 bacaan per arah + uji waktu maksimum`
-    : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump'
+    : templateId === 'infusion-pump' || templateId === 'syringe-pump'
       ? `${instrument.performanceRows.length} titik laju aliran · 6 bacaan + uji occlusion`
     : instrument.weighingScale
       ? `${instrument.weighingScale.points.length} titik beban · uji daya ulang ${instrument.weighingScale.repeatabilityLoadKg} kg`
@@ -125,7 +126,7 @@ function FormulaCard({
           <ValueLine label="Pemeriksaan fisik dan fungsi" value="10 poin · ambang 70%" />
           <ValueLine label="Kinerja" value="50 poin jika semua tekanan dan waktu maksimum lulus" />
         </View>
-      </> : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump' ? <>
+      </> : templateId === 'infusion-pump' || templateId === 'syringe-pump' ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik ukur laju aliran</Text>
           {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value="6 bacaan · toleransi 10%" />)}
@@ -144,7 +145,7 @@ function FormulaCard({
           })}
           <FormulaStep number="2" title="U95 tiap titik" equation="uc = √[(0,01/√3)² + (s/√3)² + (drift/√3)² + (U95 standar/2)²]; U95 = t × uc" detail="Drift dan U95 standar diinterpolasi dari tabel workbook pada setting uji. Derajat bebas efektif mengikuti reliabilitas 50, 2, 50, 50." />
           <FormulaStep number="3" title="Keputusan laju aliran" equation="Galat = x̄corr − setting; lulus jika |Galat / setting| ≤ 10%" detail="U95 ditampilkan di hasil dan laporan. Rumus skor Excel menentukan lulus dari persentase galat terhadap setting." />
-          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail={instrument.id === 'syringe-pump' ? 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 21 psi dari MK-24; Excel memakai 20 psi.' : 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 20 psi.'} />
+          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail={templateId === 'syringe-pump' ? 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 21 psi dari MK-24; Excel memakai 20 psi.' : 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 20 psi.'} />
           <ValueLine label="Bobot skor" value="Keselamatan listrik 40 · fisik/fungsi 10 · kinerja 50 (nilai blok flow + occlusion minimal 170%)" />
         </View>
       </> : instrument.sphygmomanometer ? <>
@@ -235,7 +236,7 @@ function FormulaCard({
       </>}
       <Text style={styles.readOnlyNote}>{instrument.suctionPump
         ? `Regresi koreksi dan drift/U95 terkunci pada Digital Pressure Meter ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}.`
-        : instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump'
+        : templateId === 'infusion-pump' || templateId === 'syringe-pump'
           ? `Koefisien koreksi dan U95 mengikuti sertifikat Infusion Device Analyzer ${instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3] ?? 'yang tercantum di workbook'}; Channel dipilih pada form pengerjaan.`
         : instrument.sphygmomanometer
         ? `Kurva dan U95 DPM terikat pada nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}. Standar dengan nomor seri lain belum bisa dihitung memakai kurva ini.`
@@ -249,7 +250,7 @@ export function FormulasScreen() {
   const recordId = Array.isArray(rawRecordId) ? rawRecordId[0] : rawRecordId;
   const { records, updateRecord } = useRecords();
   const record = records.find((item) => item.id === recordId);
-  const activeInstrument = record ? getInstrument(record.instrumentId) : undefined;
+  const activeInstrument = record ? getRecordInstrument(record) : undefined;
   const updateReference = (key: keyof MeasurementReferences, value: string) => {
     if (!record) return;
     updateRecord(record.id, { data: { ...record.data, references: { ...record.data.references, [key]: value } } });
@@ -268,8 +269,8 @@ export function FormulasScreen() {
     {instruments.map((instrument) => <FormulaCard
       key={instrument.id}
       instrument={instrument}
-      activeReferences={activeInstrument?.id === instrument.id ? record?.data.references : undefined}
-      onReferenceChange={activeInstrument?.id === instrument.id ? updateReference : undefined}
+      activeReferences={activeInstrument && getInstrumentTemplateId(activeInstrument) === instrument.id ? record?.data.references : undefined}
+      onReferenceChange={activeInstrument && getInstrumentTemplateId(activeInstrument) === instrument.id ? updateReference : undefined}
     />)}
   </ScreenPage>;
 }

@@ -1,6 +1,9 @@
 import type {
   CalibrationData,
+  CalibrationRecord,
+  CustomEquipment,
   Instrument,
+  Standard,
   Thermohygrometer,
   ThermohygrometerPoint,
 } from './types';
@@ -248,6 +251,25 @@ export const instruments: Instrument[] = [
 
 export const getInstrument = (id: string): Instrument | undefined => instruments.find((instrument) => instrument.id === id);
 
+export const getInstrumentTemplateId = (instrument: Instrument) => instrument.templateId ?? instrument.id;
+
+export function getCustomEquipmentInstrument(entry: CustomEquipment): Instrument | undefined {
+  const template = getInstrument(entry.templateId);
+  if (!template) return undefined;
+  const existingNames = new Set(template.standards.map(([name]) => name.trim().toLowerCase()));
+  const addedStandards = entry.standardNames.flatMap((name): Standard[] => {
+    const normalized = name.trim().toLowerCase();
+    if (!normalized || existingNames.has(normalized)) return [];
+    existingNames.add(normalized);
+    return [[name.trim(), '', '', ''] as Standard];
+  });
+  return { ...template, id: entry.id, templateId: template.id, name: entry.name, subtitle: `Rumus mengikuti ${template.name}`, standards: [...template.standards, ...addedStandards] };
+}
+
+export function getRecordInstrument(record: CalibrationRecord): Instrument | undefined {
+  return record.instrumentSnapshot ?? getInstrument(record.instrumentId);
+}
+
 export function createInitialData(instrumentId: string): CalibrationData {
   const instrument = getInstrument(instrumentId);
   if (!instrument) throw new Error(`Alat tidak dikenal: ${instrumentId}`);
@@ -278,7 +300,7 @@ export function createInitialData(instrumentId: string): CalibrationData {
       rapidDeflationSeconds: '',
       pressureReadings: instrument.sphygmomanometer.pressurePoints.map((setting) => ({ setting, up: readings(3), down: readings(3) })),
     } } : {}),
-    ...(instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump' ? { infusionPump: {
+    ...(getInstrumentTemplateId(instrument) === 'infusion-pump' || getInstrumentTemplateId(instrument) === 'syringe-pump' ? { infusionPump: {
       channel: 'Channel 1', occlusionReadings: readings(6),
     } } : {}),
     ...(instrument.suctionPump ? { suctionPump: {

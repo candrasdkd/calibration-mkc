@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Navbar } from '../../../components/Navbar';
 import { calculateRecord } from '../../../core/calculations';
 import { useAdminData } from '../../admin/hooks/useAdminData';
-import { getInstrument } from '../../../core/instruments';
+import { getRecordInstrument } from '../../../core/instruments';
 import { useRecords } from '../../work-orders/hooks/useRecords';
 import { useRole } from '../hooks/useRole';
 import { styles } from '../styles/HomeScreenStyles';
@@ -24,7 +24,7 @@ export default function HomeScreen() {
   const { role, setRole } = useRole();
   const draftCount = useMemo(() => records.filter((record) => {
     if (record.isDemo) return false;
-    const instrument = getInstrument(record.instrumentId);
+    const instrument = getRecordInstrument(record);
     return instrument ? !calculateRecord(instrument, record.data).complete : false;
   }).length, [records]);
   const reviewCount = useMemo(() => records.filter((record) => !record.isDemo
@@ -61,7 +61,7 @@ export default function HomeScreen() {
         <View style={styles.actionGrid}>
           {adminMenus.map((item, index) => <Pressable key={item.path} accessibilityRole="button" accessibilityLabel={`Buka data ${item.title}`} onPress={() => router.push(item.path as never)} style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}>
             <View style={[styles.actionMark, index === 1 && styles.actionMarkBlue, index === 2 && styles.actionMarkGold]}><Text style={[styles.actionMarkText, index === 1 && styles.actionMarkTextBlue, index === 2 && styles.actionMarkTextGold]}>{['RS', 'AM', 'TK', 'AK'][index]}</Text></View>
-            <Text style={styles.actionCount}>{directory[item.countKey].length} {item.countKey === 'equipmentMethods' ? 'metode' : 'data'}</Text>
+            <Text style={styles.actionCount}>{item.countKey === 'equipmentMethods' ? directory.equipmentMethods.length + directory.customEquipment.length : directory[item.countKey].length} {item.countKey === 'equipmentMethods' ? 'alkes' : 'data'}</Text>
             <Text style={styles.actionTitle}>{item.title}</Text>
             <Text style={styles.actionSubtitle}>{item.subtitle}</Text>
             <Text style={styles.actionArrow}>↗</Text>

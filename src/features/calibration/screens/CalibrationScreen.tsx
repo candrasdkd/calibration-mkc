@@ -8,7 +8,7 @@ import { PickerField } from '../../../components/picker/PickerField';
 import { PickerOption } from '../../../components/picker/PickerOption';
 import { SearchPickerModal } from '../../../components/picker/SearchPickerModal';
 import { calculateRecord } from '../../../core/calculations';
-import { getInstrument } from '../../../core/instruments';
+import { getInstrumentTemplateId, getRecordInstrument } from '../../../core/instruments';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { useRecords } from '../../work-orders/hooks/useRecords';
 import type { Customer, MeasuringDevice, ThermohygrometerCertificate } from '../../../core/admin-data';
@@ -561,17 +561,18 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
   updateSuctionPump: (data: SuctionPumpData) => void;
 }) {
   const infusionPump = data.infusionPump;
-  const infusionResult = instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump';
+  const templateId = getInstrumentTemplateId(instrument);
+  const infusionResult = templateId === 'infusion-pump' || templateId === 'syringe-pump';
   return <>
-    <EnvironmentStep data={data} update={update} result={result} mainsVoltage={instrument.id === 'fetal-doppler'} />
+    <EnvironmentStep data={data} update={update} result={result} mainsVoltage={templateId === 'fetal-doppler'} />
     <InspectionStep data={data} updateInspection={updateInspection} />
     {result.safety ? <SafetyStep data={data} update={update} safetyResult={result.safety} /> : null}
-    {instrument.id === 'fetal-doppler' ? <FetalSafetyStep data={data} update={update} /> : null}
+    {templateId === 'fetal-doppler' ? <FetalSafetyStep data={data} update={update} /> : null}
     {instrument.sphygmomanometer && data.sphygmomanometer && result.sphygmomanometer
       ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} onChange={updateSphygmomanometer} />
       : instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} />
       : instrument.suctionPump ? null : <Card>
-      <Heading title="Pengujian kinerja" hint={instrument.id === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
+      <Heading title="Pengujian kinerja" hint={templateId === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'} />
       {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
       {data.performance.map((row, rowIndex) => {
         const calculated = result.performance[rowIndex].result;
@@ -714,7 +715,7 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
         <ValueLine label="Koreksi" value={point.correction === null ? '—' : `${fmt(point.correction, 5)} kg`} />
         <ValueLine label="U95" value={`${fmt(point.uncertaintyU95Kg, 5)} kg`} />
       </View>)}
-    </Card> : ['infusion-pump', 'syringe-pump'].includes(instrument.id) ? <>
+    </Card> : ['infusion-pump', 'syringe-pump'].includes(getInstrumentTemplateId(instrument)) ? <>
       <Card><Heading title="Hasil laju aliran" />
         {result.performance.map((row) => <View key={row.id} style={styles.resultPerformance}>
           <View style={styles.resultLine}><Text style={styles.resultLabel}>{row.setting} {row.unit}</Text><Badge text={row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : 'MENUNGGU'} tone={row.result ? row.result.pass ? 'good' : 'bad' : 'wait'} /></View>
@@ -748,17 +749,18 @@ export default function CalibrationScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { records, updateRecord, storageError } = useRecords();
-  const { customers, devices, equipmentMethods, loaded: directoryLoaded } = useAdminData();
+  const { customers, devices, equipmentMethods, customEquipment, loaded: directoryLoaded } = useAdminData();
   const record = useMemo<CalibrationRecord | undefined>(() => records.find((item) => item.id === String(id)), [records, id]);
   const [step, setStep] = useState(0);
-  const instrument = record ? getInstrument(record.instrumentId) : null;
+  const instrument = record ? getRecordInstrument(record) : null;
   const data = record?.data;
   const result = instrument && data ? calculateRecord(instrument, data) : null;
 
   useEffect(() => {
     if (!record || !instrument || !data || !directoryLoaded) return;
     const legacyCustomer = customers.find((item) => item.name === data.identity.customer);
-    const configuredMethod = equipmentMethods.find((item) => item.instrumentId === instrument.id)?.method.trim();
+    const configuredMethod = (equipmentMethods.find((item) => item.instrumentId === instrument.id)?.method
+      ?? customEquipment.find((item) => item.id === instrument.id)?.method)?.trim();
     const missingMethod = !data.identity.method?.trim() && configuredMethod;
     const legacyDevices = devices.filter((device) => instrument.standards.some((standard) => standard[3] === device.serial)).map(deviceSnapshot);
     const legacyThermohygrometer = devices.find((device) => device.serial === data.environment.standardId);

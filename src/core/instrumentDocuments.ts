@@ -1,5 +1,6 @@
 import type { CalculationResult, CalibrationRecord, DocumentKind, Instrument, PerformanceResultRow } from './types';
 import { mkcLogo } from './mkcLogo';
+import { getInstrumentTemplateId } from './instruments';
 
 const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const html = (value: unknown) => String(value ?? '—').replace(/[&<>"']/g, (character) => entities[character] ?? character);
@@ -22,12 +23,13 @@ function validityDate(value: string) {
 }
 
 function capacityUnit(instrument: Instrument) {
+  const templateId = getInstrumentTemplateId(instrument);
   if (instrument.weighingScale) return 'kg';
   if (instrument.sphygmomanometer) return 'mmHg';
   if (instrument.suctionPump) return 'mmHg';
-  return instrument.id === 'fetal-doppler' ? 'BPM'
-    : instrument.id === 'flowmeter' ? 'L/min'
-      : ['infusion-pump', 'syringe-pump'].includes(instrument.id) ? 'mL/h' : 'RPM';
+  return templateId === 'fetal-doppler' ? 'BPM'
+    : templateId === 'flowmeter' ? 'L/min'
+      : ['infusion-pump', 'syringe-pump'].includes(templateId) ? 'mL/h' : 'RPM';
 }
 
 function reportStyles() {
@@ -161,7 +163,7 @@ function performanceTable(rows: PerformanceResultRow[], title: string) {
 }
 
 function environmentalAndAdministrative(record: CalibrationRecord, instrument: Instrument, result: CalculationResult, code: string) {
-  const fetalDoppler = instrument.id === 'fetal-doppler';
+  const fetalDoppler = getInstrumentTemplateId(instrument) === 'fetal-doppler';
   const safety = fetalDoppler ? section('D', 'Pengujian Keselamatan Listrik', fetalSafetyTable(record, result)) : result.safety ? section('E', 'Pengujian keselamatan listrik', safetyTable(result)) : '';
   const physicalLetter = fetalDoppler ? 'E' : 'D';
   return `${header(instrument, record, 'LEMBAR KERJA KALIBRASI DAN PENGUJIAN', code)}${section('A', 'Data administrasi', identityTable(record, instrument))}${section('B', 'Standar dan peralatan yang digunakan', standardsTable(record, instrument))}${section('C', 'Pengukuran kondisi lingkungan', environmentTable(result, fetalDoppler ? record.data.safety.voltage : ''))}${safety}${section(physicalLetter, 'Pemeriksaan fisik dan fungsi alat', inspectionTable(result))}`;
@@ -173,7 +175,7 @@ function reportFooter(record: CalibrationRecord, result: CalculationResult) {
 
 function performanceReport(record: CalibrationRecord, instrument: Instrument, result: CalculationResult, code: string, performanceTitle: string) {
   const opening = environmentalAndAdministrative(record, instrument, result, code);
-  const performanceLetter = instrument.id === 'fetal-doppler' ? 'F' : result.safety ? 'F' : 'E';
+  const performanceLetter = getInstrumentTemplateId(instrument) === 'fetal-doppler' ? 'F' : result.safety ? 'F' : 'E';
   return `<!doctype html><html><head><meta charset="utf-8">${reportStyles()}</head><body><section class="page">${opening}<div class="page-label">Halaman 1</div></section><section class="page">${header(instrument, record, 'LEMBAR HASIL PENGUKURAN KINERJA', code)}${section(performanceLetter, performanceTitle, performanceTable(result.performance, performanceTitle))}${reportFooter(record, result)}<div class="page-label">Halaman 2</div></section></body></html>`;
 }
 
@@ -318,7 +320,7 @@ function workbookCertificate(record: CalibrationRecord, instrument: Instrument, 
 }
 
 function certificate(record: CalibrationRecord, instrument: Instrument, result: CalculationResult) {
-  if (['adult-scale-digital', 'adult-scale-mechanical', 'sphygmomanometer-analog', 'sphygmomanometer-digital', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.id)) {
+  if (['adult-scale-digital', 'adult-scale-mechanical', 'sphygmomanometer-analog', 'sphygmomanometer-digital', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(getInstrumentTemplateId(instrument))) {
     return workbookCertificate(record, instrument, result);
   }
   const identity = record.data.identity;
@@ -335,7 +337,7 @@ function certificate(record: CalibrationRecord, instrument: Instrument, result: 
 }
 
 function report(record: CalibrationRecord, instrument: Instrument, result: CalculationResult) {
-  switch (instrument.id) {
+  switch (getInstrumentTemplateId(instrument)) {
     case 'fetal-doppler': return performanceReport(record, instrument, result, '045-18', 'Pengujian kinerja · heart rate');
     case 'flowmeter': return performanceReport(record, instrument, result, '006-18', 'Pengujian kinerja · laju aliran gas oksigen');
     case 'adult-scale-digital':

@@ -5,7 +5,7 @@ import * as Sharing from 'expo-sharing';
 import { ActionButton, Badge, Card, ConfirmModal, DateField, Field, ValueLine } from '../../../components/ui';
 import { calculateRecord } from '../../../core/calculations';
 import { buildDocumentHtml } from '../../../core/documents';
-import { getInstrument } from '../../../core/instruments';
+import { getRecordInstrument } from '../../../core/instruments';
 import type { DocumentKind, Instrument } from '../../../core/types';
 import { useRole } from '../../home/hooks/useRole';
 import { useRecords } from '../../work-orders/hooks/useRecords';
@@ -58,7 +58,7 @@ export function ResultsScreen() {
     {!loaded ? <Card><Text style={styles.muted}>Memuat data pekerjaan…</Text></Card> : null}
     {loaded && !records.length ? <Card style={styles.emptyState}><View style={styles.emptyMark}><Text style={styles.emptyMarkText}>—</Text></View><Text style={styles.emptyTitle}>Belum ada hasil</Text><Text style={styles.muted}>Hasil pekerjaan teknisi akan muncul di sini untuk ditinjau.</Text></Card> : null}
     {records.map((record) => {
-      const item = getInstrument(record.instrumentId);
+      const item = getRecordInstrument(record);
       if (!item) return null;
       const calculation = calculateRecord(item, record.data);
       const expanded = selectedId === record.id;

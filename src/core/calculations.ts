@@ -1,4 +1,4 @@
-import { thermohygrometers } from './instruments';
+import { getInstrumentTemplateId, thermohygrometers } from './instruments';
 import type {
   CalculationResult,
   CalculatedPerformance,
@@ -453,6 +453,7 @@ function calculateSafety(safety: SafetyData): SafetyResult {
 }
 
 export function calculateRecord(instrument: Instrument, data: CalibrationData): CalculationResult {
+  const templateId = getInstrumentTemplateId(instrument);
   const capacity = positiveIdentityNumber(data.identity.capacity);
   const accuracy = positiveIdentityNumber(data.identity.accuracy);
   const calculationInstrument = instrument.weighingScale
@@ -477,8 +478,8 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
       ? pumpAnalyzerValid ? calculatePumpFlow(row, data.infusionPump?.channel ?? '') : null
       : calculatePerformanceRow(row, data.references),
   }));
-  const infusionPump = instrument.id === 'infusion-pump' || instrument.id === 'syringe-pump';
-  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump, instrument.id === 'syringe-pump' ? 21 : 20) : null;
+  const infusionPump = templateId === 'infusion-pump' || templateId === 'syringe-pump';
+  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump, templateId === 'syringe-pump' ? 21 : 20) : null;
   const suctionDpmSerial = instrument.suctionPump ? dpmSerial : undefined;
   const suctionDpmValid = data.selectedDevices === undefined || Boolean(selectedDpm && selectedDpm.serial === suctionDpmSerial);
   const suctionPump = instrument.suctionPump ? calculateSuctionPump(instrument.suctionPump, data.suctionPump, suctionDpmValid) : null;
@@ -496,7 +497,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const physicalScore = inspectionRate === null
     ? null
     : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
-  const safety = ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.id) ? calculateSafety(data.safety) : null;
+  const safety = ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId) ? calculateSafety(data.safety) : null;
   const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete
     : suctionPump ? suctionPump.complete
       : infusionPump ? performance.length > 0 && performance.every((row) => row.result !== null) && pumpOcclusion !== null
@@ -597,7 +598,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     if (performance.some((row) => row.result === null)) missing.push('Bacaan laju aliran pada seluruh titik ukur');
   } else if (!performanceComplete) missing.push('Titik ukur, bacaan, dan ketidakpastian kinerja');
   if (safety && !safety.complete) missing.push('Semua pemeriksaan keselamatan listrik');
-  if (instrument.id === 'fetal-doppler') {
+  if (templateId === 'fetal-doppler') {
     const safetyMeasurements: [string, string][] = [
       [data.safety.voltage, 'Tegangan jala-jala'],
       [data.safety.earthResistance, 'Resistansi pembumian protektif'],

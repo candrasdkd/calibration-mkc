@@ -4,7 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { ActionButton, Badge, Card, ConfirmModal } from '../../../components/ui';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { calculateRecord } from '../../../core/calculations';
-import { getInstrument } from '../../../core/instruments';
+import { getRecordInstrument } from '../../../core/instruments';
 import { useRecords } from '../hooks/useRecords';
 import { styles } from '../styles/DraftsScreenStyles';
 
@@ -32,7 +32,7 @@ export function DraftsScreen() {
   const recordRows = useMemo(() => records.filter((record) => !record.isDemo)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .flatMap((record) => {
-      const instrument = getInstrument(record.instrumentId);
+      const instrument = getRecordInstrument(record);
       return instrument ? [{ record, instrument, result: calculateRecord(instrument, record.data) }] : [];
     }), [records]);
   const { drafts, completed } = useMemo(() => ({
@@ -58,7 +58,7 @@ export function DraftsScreen() {
 
   const removeRecord = (record: CalibrationRecord) => setConfirmation({
     title: 'Hapus catatan?',
-    message: `${getInstrument(record.instrumentId)?.name || 'Catatan'} ini akan dihapus dari perangkat.`,
+    message: `${getRecordInstrument(record)?.name || 'Catatan'} ini akan dihapus dari perangkat.`,
     confirmLabel: 'Hapus', danger: true, onConfirm: () => deleteRecord(record.id),
   });
 
