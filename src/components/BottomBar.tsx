@@ -14,6 +14,7 @@ const menuItems: Record<Role, { path: string; title: string; subtitle: string; m
     { path: '/admin/technicians', title: 'Teknisi', subtitle: 'Data petugas pelaksana', mark: 'TK' },
     { path: '/admin/instruments', title: 'Katalog Alkes', subtitle: 'Jenis alat dan metode kerja', mark: 'AK' },
     { path: '/admin/results', title: 'Cek hasil teknisi', subtitle: 'Tinjau hasil dan dokumen', mark: 'HASIL' },
+    { path: '/rumus', title: 'Rumus kalibrasi', subtitle: 'Edit metode dan pola hitung alat', mark: 'ƒx' },
   ],
   technician: [
     { path: '/form', title: 'Mulai kalibrasi', subtitle: 'Buat pengerjaan baru', mark: 'MULAI' },

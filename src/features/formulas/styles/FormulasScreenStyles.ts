@@ -10,6 +10,7 @@ export const styles = StyleSheet.create({
   formulaMeta: { color: colors.primary, fontSize: 10, fontWeight: '800', marginTop: 6 },
   formulaChevron: { color: colors.primary, fontSize: 24, fontWeight: '700', paddingHorizontal: 5 },
   formulaBody: { paddingHorizontal: 17, paddingBottom: 17 },
+  editorAction: { gap: 10, marginBottom: 12 },
   formulaGroup: { borderTopWidth: 1, borderColor: colors.border, paddingTop: 14, marginTop: 7 },
   formulaGroupTitle: { color: colors.ink, fontSize: 13, fontWeight: '800', marginBottom: 8, lineHeight: 19 },
   groupHint: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 9 },

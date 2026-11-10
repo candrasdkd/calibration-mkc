@@ -19,12 +19,11 @@ export default function HomeScreen() {
     let drafts = 0;
     let pendingDocuments = 0;
     records.forEach((record) => {
-      if (record.isDemo) return;
       const instrument = getRecordInstrument(record);
       if (!instrument) return;
       const complete = calculateRecord(instrument, record.data).complete;
       if (!complete) drafts += 1;
-      else if (!record.data.identity.documentNumber.trim() || !record.data.identity.orderNumber?.trim() || !record.data.identity.issueDate.trim()) pendingDocuments += 1;
+      else if (!record.data.identity.issueDate.trim()) pendingDocuments += 1;
     });
     return { drafts, pendingDocuments };
   }, [records]);
@@ -59,7 +58,7 @@ export default function HomeScreen() {
 
         <Pressable accessibilityRole="button" accessibilityLabel="Cek hasil teknisi" onPress={() => router.push('/admin/results')} style={({ pressed }) => [styles.reviewCard, pressed && styles.pressed]}>
           <View style={styles.reviewIcon}><Text style={styles.reviewIconText}>HASIL</Text></View>
-          <View style={styles.reviewCopy}><Text style={styles.reviewTitle}>Tinjau hasil teknisi</Text><Text style={styles.reviewHint}>{taskCounts.pendingDocuments ? `${taskCounts.pendingDocuments} hasil menunggu nomor sertifikat, order, atau tanggal terbit.` : 'Buka daftar hasil dan kelola dokumennya.'}</Text></View>
+          <View style={styles.reviewCopy}><Text style={styles.reviewTitle}>Tinjau hasil teknisi</Text><Text style={styles.reviewHint}>{taskCounts.pendingDocuments ? `${taskCounts.pendingDocuments} hasil menunggu tanggal terbit sertifikat.` : 'Buka daftar hasil dan kelola dokumennya.'}</Text></View>
           <Text style={styles.reviewArrow}>›</Text>
         </Pressable>
         <Text style={styles.menuHint}>Pelanggan, standar, teknisi, dan katalog alkes tersedia di Menu.</Text>

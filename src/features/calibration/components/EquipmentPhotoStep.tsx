@@ -15,6 +15,12 @@ const sides: { key: keyof EquipmentPhotos; label: string }[] = [
 ];
 
 const emptyPhotos: EquipmentPhotos = { front: '', back: '', left: '', right: '' };
+let photoFileSequence = 0;
+
+function photoFileName(side: keyof EquipmentPhotos, extension: string) {
+  photoFileSequence += 1;
+  return `kalibrasi-${Date.now()}-${photoFileSequence}-${side}.${extension.replace(/[^a-z0-9]/gi, '') || 'jpg'}`;
+}
 
 export function EquipmentPhotoStep({ photos, onChange }: {
   photos?: EquipmentPhotos;
@@ -43,7 +49,7 @@ export function EquipmentPhotoStep({ photos, onChange }: {
         ?? asset.uri.match(/\.([a-z0-9]+)(?:[?#]|$)/i)?.[1]
         ?? asset.mimeType?.split('/')[1]
         ?? 'jpg';
-      const fileName = `kalibrasi-${Date.now()}-${side}.${extension.replace(/[^a-z0-9]/gi, '') || 'jpg'}`;
+      const fileName = photoFileName(side, extension);
       const destination = new File(Paths.document, fileName);
       await new File(asset.uri).copy(destination);
       // shortcut: replaced photo files remain on-device; clean them up once record storage can confirm persistence.

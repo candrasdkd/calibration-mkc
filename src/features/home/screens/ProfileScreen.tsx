@@ -1,45 +1,55 @@
-import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Navbar } from '../../../components/Navbar';
-import { Card, Heading } from '../../../components/ui';
+import { ActionButton, Card, ConfirmModal, Heading } from '../../../components/ui';
 import { useRole } from '../hooks/useRole';
 import { styles } from '../styles/ProfileScreenStyles';
 
 export default function ProfileScreen() {
-  const { role, setRole } = useRole();
+  const router = useRouter();
+  const { role, userName, signOut, isServerSession } = useRole();
   const isAdmin = role === 'admin';
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const logout = async () => {
+    setLoggingOut(true);
+    try {
+      await signOut();
+      router.replace('/login');
+    } catch {
+      Alert.alert('Logout gagal', 'Sesi belum bisa dihapus. Periksa koneksi lalu coba lagi.');
+    } finally {
+      setLoggingOut(false);
+      setConfirmLogout(false);
+    }
+  };
+
   return <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-    <Navbar title="Profil" subtitle="PENGATURAN MODE" />
+    <Navbar title="Profil" subtitle="AKUN DAN PREFERENSI" />
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <Text style={styles.eyebrow}>PROFIL PERAN</Text>
       <Card style={styles.profileCard}>
         <View style={[styles.avatar, isAdmin ? styles.adminAvatar : styles.technicianAvatar]}><Text style={styles.avatarText}>{isAdmin ? 'AD' : 'TK'}</Text></View>
         <View style={styles.profileCopy}>
-          <Text style={styles.roleLabel}>ROLE AKTIF</Text>
-          <Text style={styles.profileTitle}>{isAdmin ? 'Admin' : 'Teknisi'}</Text>
-          <Text style={styles.profileSubtitle}>Mode uji aplikasi · tanpa login</Text>
+          <Text style={styles.roleLabel}>SESI AKTIF · {isAdmin ? 'ADMIN' : 'TEKNISI'}</Text>
+          <Text style={styles.profileTitle}>{userName || (isAdmin ? 'Admin lokal' : 'Teknisi lokal')}</Text>
+          <Text style={styles.profileSubtitle}>{isServerSession ? 'Akun Supabase' : 'Login demo lokal'}</Text>
         </View>
       </Card>
 
       <Card>
-        <Heading title="Pilih role" hint="Role menentukan dashboard dan menu yang tersedia. Kamu bisa menggantinya kapan saja." />
-        <View style={styles.roleOptions}>
-          {(['admin', 'technician'] as const).map((option) => {
-            const selected = role === option;
-            return <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setRole(option)} style={[styles.roleOption, selected && styles.roleOptionSelected]}>
-              <View style={[styles.roleMark, selected && styles.roleMarkSelected]}><Text style={[styles.roleMarkText, selected && styles.roleMarkTextSelected]}>{option === 'admin' ? 'AD' : 'TK'}</Text></View>
-              <View style={styles.roleCopy}><Text style={[styles.roleName, selected && styles.roleNameSelected]}>{option === 'admin' ? 'Admin' : 'Teknisi'}</Text><Text style={styles.roleDescription}>{option === 'admin' ? 'Kelola data dan hasil' : 'Kerjakan kalibrasi'}</Text></View>
-              {selected ? <Text style={styles.selectedMark}>✓</Text> : null}
-            </Pressable>;
-          })}
-        </View>
+        <Heading title={isServerSession ? 'Sesi server' : 'Sesi lokal'} hint={isServerSession ? 'Akun diverifikasi Supabase. Data operasional disinkronkan ke server dan disimpan di perangkat sebagai cache.' : 'Autentikasi server belum terhubung. Logout akan menutup sesi, tetapi tidak menghapus data kalibrasi di perangkat.'} />
+        <ActionButton title={loggingOut ? 'Keluar…' : 'Logout'} danger onPress={() => setConfirmLogout(true)} disabled={loggingOut} />
       </Card>
 
       <Card style={styles.localCard}>
-        <Text style={styles.localTitle}>Data tersimpan lokal</Text>
-        <Text style={styles.localHint}>Data aplikasi saat ini disimpan di perangkat ini. Profil akun dan sinkronisasi belum digunakan.</Text>
+        <Text style={styles.localTitle}>{isServerSession ? 'Data lokal & Supabase' : 'Data tersimpan lokal'}</Text>
+        <Text style={styles.localHint}>{isServerSession ? 'Saat akun server aktif dan koneksi tersedia, data pelanggan, standar, metode, dan pengerjaan disinkronkan ke Supabase. Salinan lokal dipakai sebagai cache dan tidak dihapus saat logout.' : 'Nama pengguna dan peran sesi demo tersimpan di perangkat ini. Data pelanggan, standar, metode, dan pengerjaan tetap ada setelah logout.'}</Text>
       </Card>
     </ScrollView>
+    <ConfirmModal visible={confirmLogout} title="Keluar dari sesi?" message="Kamu akan kembali ke halaman login. Data lokal tidak akan dihapus." confirmLabel="Logout" onCancel={() => setConfirmLogout(false)} onConfirm={logout} />
   </SafeAreaView>;
 }

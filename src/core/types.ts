@@ -1,7 +1,7 @@
 export type PerformanceFormula =
   | 'centrifugeSpeed' | 'centrifugeTime' | 'fetalHeartRate' | 'flowmeter' | 'infusionFlow'
   | 'workbookAccuracy' | 'workbookMinimum' | 'workbookMaximum' | 'workbookBand'
-  | 'workbookPairedAccuracy' | 'workbookComparisonAccuracy' | 'workbookRange';
+  | 'workbookPairedAccuracy' | 'workbookComparisonAccuracy' | 'workbookRange' | 'customExpression';
 export type InspectionChoice = '' | 'Baik' | 'Tidak baik';
 export type DocumentKind = 'report' | 'certificate';
 
@@ -29,6 +29,8 @@ export interface InstrumentScore {
   performanceThreshold: number;
   performanceWeight: number;
   physicalWeight: number;
+  physicalThreshold?: number;
+  overallPassThreshold?: number;
 }
 
 export interface WeighingStandardWeight {
@@ -53,7 +55,18 @@ export interface WeighingScaleConfig {
   resolutionKg: number;
   resolutionDivisor: 3 | 6;
   repeatabilityLoadKg: number;
+  degreesOfFreedom: [number, number, number, number];
   points: WeighingTestPoint[];
+}
+
+export interface ElectricalSafetyConfig {
+  voltageMinimumV: number;
+  voltageMaximumV: number;
+  earthResistanceLimitsOhm: [number, number, number, number];
+  leakageCurrentLimitsMa: [number, number, number, number];
+  appliedLeakageLimitMa: number;
+  insulationMinimumMOhm: number;
+  scorePerPassedCheck: number;
 }
 
 export interface SphygmomanometerPoint {
@@ -69,6 +82,52 @@ export interface SphygmomanometerConfig {
   dpmCorrections: SphygmomanometerPoint[];
   dpmU95: number;
   drift: SphygmomanometerPoint[];
+  leakageLimitMmHg: number;
+  deflationLimitSeconds: number;
+  pressureToleranceMmHg: number;
+  minimumPressureU95MmHg: number;
+  degreesOfFreedom: [number, number, number, number];
+}
+
+export type NumericCurvePoint = [setting: number, value: number];
+
+export interface InfusionPumpChannelConfig {
+  channel: string;
+  flowSlope: number;
+  flowIntercept: number;
+  flowDrift: NumericCurvePoint[];
+  occlusionSlope: number;
+  occlusionIntercept: number;
+}
+
+export interface InfusionPumpMethodConfig {
+  channels: InfusionPumpChannelConfig[];
+  flowCertificateU95: NumericCurvePoint[];
+  flowDegreesOfFreedom: [number, number, number, number];
+  occlusionDegreesOfFreedom: [number, number, number];
+  flowResolution: number;
+  occlusionResolution: number;
+  occlusionDpmU95: number;
+  flowToleranceRatio: number;
+  occlusionLimit: number;
+}
+
+export interface SuctionPumpConfig {
+  pressurePoints: number[];
+  minimumVacuumMmHg: number;
+  maximumVacuumMmHg: number;
+  legacyMinimumVacuumMmHg: number;
+  maximumVacuumSeconds: number;
+  pressureToleranceRatio: number;
+  meterResolution: number;
+  meterU95: number;
+  degreesOfFreedom: [number, number, number, number];
+  slopeUp: number;
+  interceptUp: number;
+  slopeDown: number;
+  interceptDown: number;
+  driftUp: NumericCurvePoint[];
+  driftDown: NumericCurvePoint[];
 }
 
 export interface SphygmomanometerPressureInput {
@@ -117,6 +176,13 @@ export interface PerformanceSetting {
   includeInScore?: boolean;
   uncertaintyRule?: 'signed' | 'absolute';
   sourceIds?: string[];
+  customExpressions?: {
+    correction: string;
+    uncertainty: string;
+    tolerance: string;
+    testValue: string;
+    pass: string;
+  };
 }
 
 export type Standard = [name: string, brand: string, model: string, serial: string];
@@ -132,10 +198,44 @@ export interface Instrument {
   references: MeasurementReferences;
   score: InstrumentScore;
   electricalSafety?: boolean;
+  methodVersion?: number;
+  formulaExpressions?: Record<string, string>;
+  electricalSafetyConfig?: ElectricalSafetyConfig;
   weighingScale?: WeighingScaleConfig;
   sphygmomanometer?: SphygmomanometerConfig;
-  suctionPump?: { pressurePoints: number[]; minimumVacuumMmHg: number; maximumVacuumMmHg: number };
+  infusionPump?: InfusionPumpMethodConfig;
+  suctionPump?: SuctionPumpConfig;
 }
+
+export interface VersionedFormulaMethod {
+  version: number;
+  resolution: number;
+  expressions: Record<string, string>;
+}
+
+export interface MethodChangeMetadata {
+  source: string;
+  reason: string;
+  verificationNote: string;
+  verifiedBy: string;
+  effectiveDate: string;
+}
+
+export interface InstrumentMethodRevision extends Partial<MethodChangeMetadata> {
+  instrumentId: string;
+  version: number;
+  updatedAt: string;
+  instrument: Instrument;
+}
+
+export interface InstrumentMethodDraft extends MethodChangeMetadata {
+  instrumentId: string;
+  updatedAt: string;
+  instrument: Instrument;
+}
+
+export type EnvironmentMethodDraft = Omit<VersionedFormulaMethod, 'version'> & MethodChangeMetadata & { updatedAt: string };
+export type EnvironmentMethodRevision = VersionedFormulaMethod & Partial<MethodChangeMetadata> & { updatedAt: string };
 
 export interface CustomEquipment {
   id: string;
@@ -173,6 +273,7 @@ export interface EnvironmentData {
   temperatureEnd: string;
   humidityStart: string;
   humidityEnd: string;
+  formulaMethod?: VersionedFormulaMethod;
 }
 
 export interface InspectionEntry {
@@ -223,7 +324,9 @@ export interface SafetyData {
 
 export interface CalibrationData {
   identity: IdentityData;
+  orderGroupId?: string;
   equipmentPhotos?: EquipmentPhotos;
+  equipmentPhotoPaths?: EquipmentPhotos;
   selectedDevices?: SelectedMeasurementDevice[];
   environment: EnvironmentData;
   references: MeasurementReferences;
@@ -257,7 +360,6 @@ export interface CalibrationRecord {
   instrumentSnapshot?: Instrument;
   createdAt: string;
   updatedAt: string;
-  isDemo?: boolean;
   data: CalibrationData;
 }
 
@@ -346,6 +448,7 @@ export interface WeighingPointResult {
   standardWeightsComplete: boolean;
   referenceMassKg: number | null;
   correction: number | null;
+  reportCorrection: number | null;
   uncertaintyU95Kg: number | null;
   complete: boolean;
 }
@@ -359,13 +462,13 @@ export interface WeighingRepeatabilityResult {
 export interface WeighingResult {
   repeatabilityMean: number | null;
   repeatabilityStandardDeviation: number | null;
-  reportStandardDeviation: number;
+  reportStandardDeviation: number | null;
   repeatabilityReadings: WeighingRepeatabilityResult[];
   points: WeighingPointResult[];
   maxAbsoluteCorrection: number | null;
   maxUncertaintyU95: number | null;
   lop: number | null;
-  limit: number;
+  limit: number | null;
   pass: boolean | null;
   complete: boolean;
 }

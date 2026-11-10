@@ -3,13 +3,17 @@ import type {
   CalibrationRecord,
   CustomEquipment,
   Instrument,
+  InstrumentMethodRevision,
+  InfusionPumpMethodConfig,
   PerformanceFormula,
   PerformanceSetting,
   Standard,
+  SuctionPumpConfig,
   Thermohygrometer,
   ThermohygrometerPoint,
 } from './types';
 import { adultScaleDigital, adultScaleMechanical, adultScaleStandards } from './weighingScales';
+import { defaultElectricalSafetyConfig, defaultElectricalSafetyExpressions, defaultInstrumentFormulaExpressions } from './methodFormulas';
 
 const readings = (count: number): string[] => Array.from({ length: count }, () => '');
 const workbookPoint = (
@@ -76,6 +80,30 @@ const sphygmomanometerDrift = [
   { pressure: 100, up: 0.52, down: 0.42 }, { pressure: 150, up: 0.61, down: 0.61 },
   { pressure: 200, up: 0.61, down: 0.61 }, { pressure: 250, up: 0.71, down: 0.61 },
 ];
+const infusionPumpMethod = (occlusionLimit: number): InfusionPumpMethodConfig => ({
+  channels: [
+    { channel: 'Channel 1', flowSlope: -0.0044382463855594, flowIntercept: -0.6893402184501818, flowDrift: [[5, 0.32], [10, 0.21], [50, 1.11], [100, 1.1], [300, 7.83]], occlusionSlope: 0.0007131474999683357, occlusionIntercept: -0.32276291846077326 },
+    { channel: 'Channel 2', flowSlope: -0.008489446490550527, flowIntercept: -0.9974586654622964, flowDrift: [[5, 0.09], [10, 0.3], [50, 0.64], [100, 3.63], [300, 1.72]], occlusionSlope: 0.0007349966213253538, occlusionIntercept: -0.19390370130089055 },
+    { channel: 'Channel 3', flowSlope: -0.021639410741783483, flowIntercept: 0.031476368066201355, flowDrift: [[5, 0.32], [10, 0.02], [50, 0.77], [100, 0.35], [300, 7.83]], occlusionSlope: 0.000803253772109678, occlusionIntercept: -0.02413768438734311 },
+  ],
+  flowCertificateU95: [[10, 0.11], [25, 0.25625], [50, 0.5], [75, 0.75], [100, 1], [150, 1.55], [300, 3.2]],
+  flowDegreesOfFreedom: [50, 2, 50, 50],
+  occlusionDegreesOfFreedom: [50, 2, 50],
+  flowResolution: 0.01,
+  occlusionResolution: 0.01,
+  occlusionDpmU95: 0.012,
+  flowToleranceRatio: 0.1,
+  occlusionLimit,
+});
+const suctionPumpMethod: SuctionPumpConfig = {
+  pressurePoints: [-150, -225, -300, -375, -450], minimumVacuumMmHg: 150, maximumVacuumMmHg: 450,
+  legacyMinimumVacuumMmHg: 300,
+  maximumVacuumSeconds: 10, pressureToleranceRatio: 0.1, meterResolution: 20, meterU95: 0.31,
+  degreesOfFreedom: [50, 2, 50, 50], slopeUp: 0.003441823675411558, interceptUp: 0.2940836678821175,
+  slopeDown: 0.003504637540282135, interceptDown: 0.3211573395802835,
+  driftUp: [[0, 0.02], [100, 0.82], [200, 0.12], [300, 0.42], [400, 0.12], [500, 0.22], [600, 0.72]],
+  driftDown: [[0, 0.02], [100, 0.52], [200, 0.08], [300, 0.32], [400, 0.12], [500, 0.42], [600, 0.72]],
+};
 export const thermohygrometers: Thermohygrometer[] = [
   {
     id: 'EFG19BE02496',
@@ -195,6 +223,7 @@ export const instruments: Instrument[] = [
     performanceRows: [10, 50, 100, 150, 300].map((setting) => ({ id: String(setting), label: 'Laju aliran', setting: String(setting), unit: 'mL/h', count: 6, tolerancePercent: '10', formula: 'infusionFlow' as const })),
     references: { calibratorResolution: '0.01', calibratorUncertainty: '0', uutResolution: '0.01' },
     score: { performanceThreshold: 85, performanceWeight: 50, physicalWeight: 10 },
+    infusionPump: infusionPumpMethod(20),
   },
   {
     id: 'syringe-pump',
@@ -209,6 +238,7 @@ export const instruments: Instrument[] = [
     performanceRows: [10, 25, 50, 75, 100].map((setting) => ({ id: String(setting), label: 'Laju aliran', setting: String(setting), unit: 'mL/h', count: 6, tolerancePercent: '10', formula: 'infusionFlow' as const })),
     references: { calibratorResolution: '0.01', calibratorUncertainty: '0', uutResolution: '0.01' },
     score: { performanceThreshold: 85, performanceWeight: 50, physicalWeight: 10 },
+    infusionPump: infusionPumpMethod(21),
   },
   {
     id: 'suction-pump',
@@ -223,7 +253,7 @@ export const instruments: Instrument[] = [
     performanceRows: [],
     references: { calibratorResolution: '20', calibratorUncertainty: '0.31', uutResolution: '20' },
     score: { performanceThreshold: 100, performanceWeight: 50, physicalWeight: 10 },
-    suctionPump: { pressurePoints: [-150, -225, -300, -375, -450], minimumVacuumMmHg: 150, maximumVacuumMmHg: 450 },
+    suctionPump: suctionPumpMethod,
   },
   {
     id: 'adult-scale-digital',
@@ -272,6 +302,8 @@ export const instruments: Instrument[] = [
       ],
       dpmU95: 0.15,
       drift: sphygmomanometerDrift,
+      leakageLimitMmHg: 15, deflationLimitSeconds: 10, pressureToleranceMmHg: 4, minimumPressureU95MmHg: 0.99,
+      degreesOfFreedom: [50, 5, 50, 50],
     },
   },
   {
@@ -299,6 +331,8 @@ export const instruments: Instrument[] = [
       ],
       dpmU95: 0.4,
       drift: sphygmomanometerDrift,
+      leakageLimitMmHg: 15, deflationLimitSeconds: 10, pressureToleranceMmHg: 4, minimumPressureU95MmHg: 0.99,
+      degreesOfFreedom: [50, 5, 50, 50],
     },
   },
   {
@@ -551,12 +585,62 @@ export const instruments: Instrument[] = [
   },
 ];
 
-export const getInstrument = (id: string): Instrument | undefined => instruments.find((instrument) => instrument.id === id);
+function mergeInstrumentDefaults(instrument: Instrument, fallback?: Instrument): Instrument {
+  const safetyRequired = Boolean(instrument.electricalSafety || fallback?.electricalSafety
+    || ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(instrument.templateId ?? fallback?.id ?? instrument.id));
+  return {
+    ...fallback,
+    ...instrument,
+    standards: Array.isArray(instrument.standards) ? instrument.standards : fallback?.standards ?? [],
+    inspectionItems: Array.isArray(instrument.inspectionItems) ? instrument.inspectionItems : fallback?.inspectionItems ?? [],
+    performanceRows: Array.isArray(instrument.performanceRows) ? instrument.performanceRows : fallback?.performanceRows ?? [],
+    references: { ...fallback?.references, ...instrument.references },
+    score: {
+      ...fallback?.score,
+      physicalThreshold: fallback?.score.physicalThreshold ?? 70,
+      overallPassThreshold: fallback?.score.overallPassThreshold ?? 70,
+      ...instrument.score,
+    },
+    formulaExpressions: {
+      ...defaultInstrumentFormulaExpressions[fallback?.id ?? instrument.id],
+      ...(safetyRequired ? defaultElectricalSafetyExpressions : {}),
+      ...fallback?.formulaExpressions,
+      ...instrument.formulaExpressions,
+    },
+    ...(instrument.electricalSafetyConfig || fallback?.electricalSafetyConfig || safetyRequired ? {
+      electricalSafetyConfig: { ...defaultElectricalSafetyConfig, ...fallback?.electricalSafetyConfig, ...instrument.electricalSafetyConfig },
+    } : {}),
+    ...(instrument.weighingScale ? { weighingScale: { ...fallback?.weighingScale, ...instrument.weighingScale, degreesOfFreedom: instrument.weighingScale.degreesOfFreedom ?? fallback?.weighingScale?.degreesOfFreedom ?? [50, 50, 50, 50] } } : {}),
+    ...(instrument.sphygmomanometer ? { sphygmomanometer: { ...fallback?.sphygmomanometer, ...instrument.sphygmomanometer } } : {}),
+    ...(instrument.infusionPump || fallback?.infusionPump ? {
+      infusionPump: {
+        ...fallback?.infusionPump,
+        ...instrument.infusionPump,
+        channels: instrument.infusionPump?.channels ?? fallback?.infusionPump?.channels ?? [],
+        flowCertificateU95: instrument.infusionPump?.flowCertificateU95 ?? fallback?.infusionPump?.flowCertificateU95 ?? [],
+      } as NonNullable<Instrument['infusionPump']>,
+    } : {}),
+    ...(instrument.suctionPump ? { suctionPump: { ...fallback?.suctionPump, ...instrument.suctionPump } } : {}),
+  };
+}
+
+export const getInstrument = (id: string, revisions: InstrumentMethodRevision[] = []): Instrument | undefined => {
+  const revision = revisions.filter((item) => item.instrumentId === id).reduce<InstrumentMethodRevision | undefined>(
+    (latest, item) => !latest || item.version > latest.version ? item : latest,
+    undefined,
+  );
+  const fallback = instruments.find((instrument) => instrument.id === id);
+  const base = revision?.instrument ?? fallback;
+  return base ? { ...mergeInstrumentDefaults(base, fallback), ...(revision ? { methodVersion: revision.version } : {}) } : undefined;
+};
+
+export const getConfiguredInstruments = (revisions: InstrumentMethodRevision[] = []): Instrument[] => instruments
+  .map((instrument) => getInstrument(instrument.id, revisions) ?? instrument);
 
 export const getInstrumentTemplateId = (instrument: Instrument) => instrument.templateId ?? instrument.id;
 
-export function getCustomEquipmentInstrument(entry: CustomEquipment): Instrument | undefined {
-  const template = getInstrument(entry.templateId);
+export function getCustomEquipmentInstrument(entry: CustomEquipment, revisions: InstrumentMethodRevision[] = []): Instrument | undefined {
+  const template = getInstrument(entry.templateId, revisions);
   if (!template) return undefined;
   const existingNames = new Set(template.standards.map(([name]) => name.trim().toLowerCase()));
   const addedStandards = entry.standardNames.flatMap((name): Standard[] => {
@@ -569,12 +653,16 @@ export function getCustomEquipmentInstrument(entry: CustomEquipment): Instrument
 }
 
 export function getRecordInstrument(record: CalibrationRecord): Instrument | undefined {
-  return record.instrumentSnapshot ?? getInstrument(record.instrumentId);
+  const instrument = record.instrumentSnapshot;
+  const fallbackId = instrument?.templateId ?? instrument?.id ?? record.instrumentId;
+  const fallback = instruments.find((item) => item.id === fallbackId);
+  if (!instrument || Object.keys(instrument).length === 0) return fallback;
+  return mergeInstrumentDefaults(instrument, fallback);
 }
 
-export function createInitialData(instrumentId: string): CalibrationData {
-  const instrument = getInstrument(instrumentId);
-  if (!instrument) throw new Error(`Alat tidak dikenal: ${instrumentId}`);
+export function createInitialData(instrumentOrId: string | Instrument): CalibrationData {
+  const instrument = typeof instrumentOrId === 'string' ? getInstrument(instrumentOrId) : instrumentOrId;
+  if (!instrument) throw new Error(`Alat tidak dikenal: ${instrumentOrId}`);
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return {

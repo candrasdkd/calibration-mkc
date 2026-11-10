@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { colors } from '../../core/theme';
 
-export function Field({ label, value, onChange, keyboard = 'default', placeholder = '', multiline = false, suffix, editable = true }: {
+export function Field({ label, value, onChange, keyboard = 'default', placeholder = '', multiline = false, suffix, editable = true, secureTextEntry = false, autoCapitalize }: {
   label: string;
   value?: string | number | null;
   onChange: (value: string) => void;
@@ -11,6 +11,8 @@ export function Field({ label, value, onChange, keyboard = 'default', placeholde
   multiline?: boolean;
   suffix?: string;
   editable?: boolean;
+  secureTextEntry?: boolean;
+  autoCapitalize?: TextInputProps['autoCapitalize'];
 }) {
   const [focused, setFocused] = useState(false);
   return <View style={styles.fieldWrap}>
@@ -25,6 +27,8 @@ export function Field({ label, value, onChange, keyboard = 'default', placeholde
         placeholder={placeholder}
         placeholderTextColor="#8995A1"
         multiline={multiline}
+        secureTextEntry={secureTextEntry}
+        autoCapitalize={autoCapitalize}
         textAlignVertical={multiline ? 'top' : 'center'}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

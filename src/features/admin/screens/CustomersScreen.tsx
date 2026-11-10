@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ActionButton, Badge, Card, CompactEntityCard, ConfirmModal, Field, Heading, SearchField } from '../../../components/ui';
+import { ActionButton, Card, CompactEntityCard, ConfirmModal, Field, Heading, SearchField } from '../../../components/ui';
 import { newAdminId } from '../../../core/admin-data';
 import { useAdminData } from '../hooks/useAdminData';
 import type { Customer } from '../../../core/admin-data';
@@ -12,21 +12,7 @@ import { styles } from '../styles/AdminStyles';
 import { styles as customerStyles } from '../styles/CustomersScreenStyles';
 import type { Confirmation } from '../types/Confirmation';
 
-
-
-const blankCustomer = (): Customer => ({ id: '', name: '', province: '', provinceId: '', city: '', cityId: '', district: '', districtId: '', village: '', villageId: '', address: '', contacts: [{ id: newAdminId('pic'), name: '', phone: '' }], isDemo: false });
-
-
-
-
-
-
-
-
-
-
-
-
+const blankCustomer = (): Customer => ({ id: '', name: '', province: '', provinceId: '', city: '', cityId: '', district: '', districtId: '', village: '', villageId: '', address: '', contacts: [{ id: newAdminId('pic'), name: '', phone: '' }] });
 
 export function CustomersScreen() {
   const data = useAdminData();
@@ -69,7 +55,6 @@ export function CustomersScreen() {
     </Card> : filteredCustomers.map((customer) => {
       const expanded = expandedCustomerId === customer.id;
       return <CompactEntityCard key={customer.id} avatar="RS" title={customer.name} subtitle={`${customer.city} · ${customer.province}`} expanded={expanded} onPress={() => setExpandedCustomerId(expanded ? null : customer.id)}>
-          {customer.isDemo ? <Badge text="Data contoh" tone="wait" /> : null}
           <View style={customerStyles.addressBlock}>
             <Text style={customerStyles.sectionLabel}>ALAMAT LENGKAP</Text>
             <Text style={customerStyles.addressText}>{customer.address}</Text>
@@ -86,14 +71,14 @@ export function CustomersScreen() {
           </View>
       </CompactEntityCard>;
     })}
-    <Modal visible={Boolean(editing)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
+    <Modal visible={Boolean(editing) && !confirmation} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.deviceModalHeader}>
             <Text style={styles.deviceModalTitle}>{editing?.id ? 'Ubah pelanggan' : 'Pelanggan baru'}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Tutup form pelanggan" onPress={() => setEditing(null)}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable>
           </View>
-          {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
+          {editing ? <ScrollView style={styles.deviceModalScroll} contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
             <Card>
               <Heading title="Informasi rumah sakit" hint="Masukkan alamat lengkap agar teknisi dapat menemukan lokasi pengerjaan." />
               <Field label="Nama rumah sakit" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
@@ -109,9 +94,14 @@ export function CustomersScreen() {
                 <ActionButton title="Hapus PIC" secondary danger onPress={() => setConfirmation({ title: 'Hapus kontak PIC?', message: `${contact.name || 'Kontak ini'} akan dihapus dari data pelanggan.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => setEditing((current) => current ? { ...current, contacts: current.contacts.filter((item) => item.id !== contact.id) } : current) })} />
               </View>)}
               <ActionButton title="＋ Tambah PIC" secondary onPress={() => setEditing({ ...editing, contacts: [...editing.contacts, { id: newAdminId('pic'), name: '', phone: '' }] })} />
-              <View style={styles.actions}><ActionButton title="Simpan pelanggan" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
             </Card>
           </ScrollView> : null}
+          {editing ? <View style={styles.deviceModalFooter}>
+            <View style={[styles.actions, styles.deviceModalFooterActions]}>
+              <View style={styles.deviceModalFooterAction}><ActionButton title="Simpan pelanggan" onPress={save} disabled={locked} /></View>
+              <View style={styles.deviceModalFooterAction}><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
+            </View>
+          </View> : null}
         </KeyboardAvoidingView>
       </SafeAreaView></SafeAreaProvider>
     </Modal>

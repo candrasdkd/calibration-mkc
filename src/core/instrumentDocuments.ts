@@ -224,9 +224,8 @@ function weighingReport(record: CalibrationRecord, instrument: Instrument, resul
   const weighing = result.weighing;
   if (!weighing) return performanceReport(record, instrument, result, '', 'Pengujian kinerja');
   const unit = capacityUnit(instrument);
-  // Excel reports correction as reference mass minus indication.
   const rows = weighing.points.map((point) => '<tr><td>' + point.loadKg + '</td><td>' + fixed(point.indication, 4)
-    + '</td><td>' + fixed(point.correction === null ? null : -point.correction, 5)
+    + '</td><td>' + fixed(point.reportCorrection, 5)
     + '</td><td>' + fixed(point.uncertaintyU95Kg, 5) + '</td></tr>').join('');
   const opening = workbookOpening(record, instrument, result);
   const repeatability = '<h3>1. Daya Ulang Pembacaan</h3><table class="grid"><thead><tr><th>Beban</th><th>Standar Deviasi (' + unit
@@ -235,8 +234,8 @@ function weighingReport(record: CalibrationRecord, instrument: Instrument, resul
   const deviation = '<h3>2. Penyimpangan Dari Nilai Nominal</h3><table class="grid performance"><thead><tr><th>Beban (' + unit
     + ')</th><th>Pembacaan (' + unit + ')</th><th>Koreksi (' + unit + ')</th><th>Ketidakpastian U95 (' + unit
     + ')</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  const lop = section('G', 'Limit of Performance (F)', '<table class="grid"><tbody><tr><td>F = Koreksi maksimum + U95 maksimum</td><td>'
-    + fixed(weighing.lop, 6) + ' ' + unit + '</td></tr><tr><td>Batas 10 × resolusi</td><td>' + fixed(weighing.limit, 6) + ' '
+  const lop = section('G', 'Limit of Performance (F)', '<table class="grid"><tbody><tr><td>F = LOP sesuai rumus metode aktif</td><td>'
+    + fixed(weighing.lop, 6) + ' ' + unit + '</td></tr><tr><td>Batas LOP metode</td><td>' + fixed(weighing.limit, 6) + ' '
     + unit + '</td></tr><tr><td>Hasil</td><td>' + (weighing.pass === null ? 'BELUM LENGKAP' : weighing.pass ? 'LULUS' : 'TIDAK LULUS')
     + '</td></tr></tbody></table>');
   const secondPage = section('F', 'Hasil Pengukuran Kinerja Alat', repeatability + deviation) + lop + notesSection(record, instrument);
@@ -255,9 +254,9 @@ function sphygmomanometerReport(record: CalibrationRecord, instrument: Instrumen
     + '</td><td>' + fixed(point.up.uncertaintyU95) + '</td><td>' + fixed(point.down.uncertaintyU95) + '</td></tr>').join('');
   const opening = workbookOpening(record, instrument, result);
   const leakage = '<h3>1. Uji Kebocoran</h3><table class="grid"><thead><tr><th>Setting</th><th>Hasil Pengukuran</th><th>Ambang batas / 1 menit</th><th>Hasil</th></tr></thead><tbody><tr><td>250 mmHg · 1 menit</td><td>'
-    + fixed(sphyg.leakageDrop.value) + ' mmHg</td><td>≤ 15 mmHg</td><td>' + outcome(sphyg.leakageDrop.pass) + '</td></tr></tbody></table>';
+    + fixed(sphyg.leakageDrop.value) + ' mmHg</td><td>≤ ' + html(instrument.sphygmomanometer?.leakageLimitMmHg) + ' mmHg</td><td>' + outcome(sphyg.leakageDrop.pass) + '</td></tr></tbody></table>';
   const deflation = '<h3>2. Laju Buang Cepat</h3><table class="grid"><thead><tr><th>Hasil ukur</th><th>Batas akhir</th><th>Hasil</th></tr></thead><tbody><tr><td>'
-    + fixed(sphyg.rapidDeflationSeconds.value) + ' detik</td><td>≤ 10 detik</td><td>' + outcome(sphyg.rapidDeflationSeconds.pass) + '</td></tr></tbody></table>';
+    + fixed(sphyg.rapidDeflationSeconds.value) + ' detik</td><td>≤ ' + html(instrument.sphygmomanometer?.deflationLimitSeconds) + ' detik</td><td>' + outcome(sphyg.rapidDeflationSeconds.pass) + '</td></tr></tbody></table>';
   const accuracy = '<h3>3. Akurasi Tekanan</h3><table class="grid performance"><thead><tr><th rowspan="2">Tekanan (mmHg)</th><th rowspan="2">Setting Alat</th><th colspan="2">Pembacaan Standar</th><th colspan="2">Koreksi</th><th colspan="2">Ketidakpastian</th></tr><tr><th>Naik</th><th>Turun</th><th>Naik</th><th>Turun</th><th>Naik</th><th>Turun</th></tr></thead><tbody>'
     + rows + '</tbody></table>';
   const secondPage = section('F', 'Hasil Pengukuran Kinerja Alat', leakage + deflation + accuracy) + notesSection(record, instrument);
@@ -279,13 +278,13 @@ function pumpReport(record: CalibrationRecord, instrument: Instrument, result: C
     const pressureLimit = legacy ? '≥ 300 mmHg' : `${instrument.suctionPump?.minimumVacuumMmHg}–${instrument.suctionPump?.maximumVacuumMmHg} mmHg`;
     const rows = result.suctionPump.pressureReadings.flatMap((point) => (['up', 'down'] as const).map((direction) => {
       const item = point[direction];
-      return `<tr><td>${Math.abs(point.setting)}</td><td>${direction === 'up' ? 'Naik' : 'Turun'}</td><td>${item ? item.readings.map((value) => fixed(value)).join(' · ') : '—'}</td><td>${fixed(item?.mean)}</td><td>${fixed(item?.correction)}</td><td>${fixed(item?.correctedMean)}</td><td>${fixed(item?.error)}</td><td>${fixed(item?.uncertaintyU95)}</td><td>10%</td><td>${item ? item.pass ? 'LULUS' : 'TIDAK LULUS' : '—'}</td></tr>`;
+      return `<tr><td>${Math.abs(point.setting)}</td><td>${direction === 'up' ? 'Naik' : 'Turun'}</td><td>${item ? item.readings.map((value) => fixed(value)).join(' · ') : '—'}</td><td>${fixed(item?.mean)}</td><td>${fixed(item?.correction)}</td><td>${fixed(item?.correctedMean)}</td><td>${fixed(item?.error)}</td><td>${fixed(item?.uncertaintyU95)}</td><td>${fixed((instrument.suctionPump?.pressureToleranceRatio ?? 0.1) * 100, 2)}%</td><td>${item ? item.pass ? 'LULUS' : 'TIDAK LULUS' : '—'}</td></tr>`;
     })).join('');
-    tests = `${section('F', 'Pengujian kinerja · tekanan vakum', `<table class="grid performance"><thead><tr><th>Setting mmHg</th><th>Arah</th><th>${readingCount} bacaan DPM</th><th>Rata-rata</th><th>Koreksi drift</th><th>Terkoreksi</th><th>Galat</th><th>U95</th><th>Toleransi</th><th>Hasil</th></tr></thead><tbody>${rows}</tbody></table>`)}${section('G', 'Daya hisap maksimum dan waktu', `<table class="grid"><thead><tr><th>Vakum terbaca · magnitudo</th><th>Batas tekanan</th><th>Hasil tekanan</th><th>Waktu terukur</th><th>Batas waktu</th><th>Hasil waktu</th></tr></thead><tbody><tr><td>${fixed(result.suctionPump.maximumVacuumReading)} mmHg</td><td>${pressureLimit}</td><td>${result.suctionPump.maximumVacuumReadingPass === null ? '—' : result.suctionPump.maximumVacuumReadingPass ? 'LULUS' : 'TIDAK LULUS'}</td><td>${fixed(result.suctionPump.maximumVacuumSeconds)} detik</td><td>≤ 10 detik</td><td>${result.suctionPump.maximumVacuumPass === null ? '—' : result.suctionPump.maximumVacuumPass ? 'LULUS' : 'TIDAK LULUS'}</td></tr></tbody></table>`)}`;
+    tests = `${section('F', 'Pengujian kinerja · tekanan vakum', `<table class="grid performance"><thead><tr><th>Setting mmHg</th><th>Arah</th><th>${readingCount} bacaan DPM</th><th>Rata-rata</th><th>Koreksi drift</th><th>Terkoreksi</th><th>Galat</th><th>U95</th><th>Toleransi</th><th>Hasil</th></tr></thead><tbody>${rows}</tbody></table>`)}${section('G', 'Daya hisap maksimum dan waktu', `<table class="grid"><thead><tr><th>Vakum terbaca · magnitudo</th><th>Batas tekanan</th><th>Hasil tekanan</th><th>Waktu terukur</th><th>Batas waktu</th><th>Hasil waktu</th></tr></thead><tbody><tr><td>${fixed(result.suctionPump.maximumVacuumReading)} mmHg</td><td>${pressureLimit}</td><td>${result.suctionPump.maximumVacuumReadingPass === null ? '—' : result.suctionPump.maximumVacuumReadingPass ? 'LULUS' : 'TIDAK LULUS'}</td><td>${fixed(result.suctionPump.maximumVacuumSeconds)} detik</td><td>≤ ${instrument.suctionPump?.maximumVacuumSeconds} detik</td><td>${result.suctionPump.maximumVacuumPass === null ? '—' : result.suctionPump.maximumVacuumPass ? 'LULUS' : 'TIDAK LULUS'}</td></tr></tbody></table>`)}`;
   } else {
     const count = Math.max(...result.performance.map((row) => row.readings.length), 0);
     const headers = Array.from({ length: count }, (_, index) => `<th>${index + 1}</th>`).join('');
-    const rows = result.performance.map((row) => `<tr><td>${html(row.setting)} ${html(row.unit)}</td>${Array.from({ length: count }, (_, index) => `<td>${html(row.readings[index])}</td>`).join('')}<td>${fixed(row.result?.mean)}</td><td>${fixed(row.result?.correction)}</td><td>${fixed(row.result?.correctedMean)}</td><td>${fixed(row.result?.error)}</td><td>${fixed(row.result?.u95)}</td><td>10%</td><td>${row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : '—'}</td></tr>`).join('');
+    const rows = result.performance.map((row) => `<tr><td>${html(row.setting)} ${html(row.unit)}</td>${Array.from({ length: count }, (_, index) => `<td>${html(row.readings[index])}</td>`).join('')}<td>${fixed(row.result?.mean)}</td><td>${fixed(row.result?.correction)}</td><td>${fixed(row.result?.correctedMean)}</td><td>${fixed(row.result?.error)}</td><td>${fixed(row.result?.u95)}</td><td>${fixed(row.result ? row.result.tolerance * 100 : null, 2)}%</td><td>${row.result ? row.result.pass ? 'LULUS' : 'TIDAK LULUS' : '—'}</td></tr>`).join('');
     const flow = `<h3>1. Laju aliran · ${html(record.data.infusionPump?.channel)}</h3><table class="grid performance"><thead><tr><th rowspan="2">Setting</th><th colspan="${count}">Bacaan mL/h</th><th rowspan="2">Rata-rata</th><th rowspan="2">Koreksi analyzer</th><th rowspan="2">Terkoreksi</th><th rowspan="2">Galat</th><th rowspan="2">U95</th><th rowspan="2">Toleransi</th><th rowspan="2">Hasil</th></tr><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
     const occlusion = result.pumpOcclusion
       ? `<h3>2. Uji kemampatan / occlusion</h3><table class="grid"><thead><tr><th>Setting</th><th>Enam bacaan psi</th><th>Rata-rata mentah</th><th>Koreksi analyzer</th><th>Rata-rata terkoreksi</th><th>U95</th><th>Batas</th><th>Hasil</th></tr></thead><tbody><tr><td>100 mL/h</td><td>${result.pumpOcclusion.readings.map((value) => fixed(value)).join(' · ')}</td><td>${fixed(result.pumpOcclusion.mean)}</td><td>${fixed(result.pumpOcclusion.correction)}</td><td>${fixed(result.pumpOcclusion.correctedMean)}</td><td>${fixed(result.pumpOcclusion.uncertaintyU95)}</td><td>≤ ${result.pumpOcclusion.limit} psi</td><td>${result.pumpOcclusion.pass ? 'LULUS' : 'TIDAK LULUS'}</td></tr></tbody></table>`

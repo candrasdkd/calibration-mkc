@@ -29,7 +29,7 @@ export function DraftsScreen() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<DraftConfirmation | null>(null);
-  const recordRows = useMemo(() => records.filter((record) => !record.isDemo)
+  const recordRows = useMemo(() => records.slice()
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .flatMap((record) => {
       const instrument = getRecordInstrument(record);

@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
-import { Badge, Card, Field, Heading, ValueLine } from '../../../components/ui';
+import { ActionButton, Badge, Card, Field, Heading, ValueLine } from '../../../components/ui';
 import { ScreenPage } from '../../../components/ScreenPage';
-import { getInstrumentTemplateId, getRecordInstrument, instruments } from '../../../core/instruments';
+import { getConfiguredInstruments, getInstrumentTemplateId, getRecordInstrument } from '../../../core/instruments';
+import type { Instrument, InstrumentMethodDraft, InstrumentMethodRevision, MeasurementReferences, PerformanceFormula, PerformanceSetting } from '../../../core/types';
+import { StorageMessage } from '../../admin/components/StorageMessage';
+import { useAdminData } from '../../admin/hooks/useAdminData';
+import { useRole } from '../../home/hooks/useRole';
 import { useRecords } from '../../work-orders/hooks/useRecords';
+import { instrumentFormulaFields } from '../../../core/methodFormulas';
+import { EnvironmentFormulaModal } from '../components/EnvironmentFormulaModal';
+import { FormulaEditorModal } from '../components/FormulaEditorModal';
 import { styles } from '../styles/FormulasScreenStyles';
-
-import type { MeasurementReferences, PerformanceFormula, PerformanceSetting } from '../../../core/types';
 import type { FormulaDisplay } from '../types/FormulaDisplay';
 
 const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
@@ -23,6 +28,7 @@ const formulaDisplay: Record<PerformanceFormula, FormulaDisplay> = {
   workbookPairedAccuracy: { title: 'Rata-rata pasangan minimum/maksimum', correction: 'xi = (min_i + maks_i) / 2; C = x̄pasangan − setting', repeatability: 'UA = s pasangan / √n', acceptance: '|C| + U95 ≤ toleransi Excel' },
   workbookComparisonAccuracy: { title: 'Perbandingan UUT dan standar', correction: 'CUUT = x̄UUT − setting; Cstd = x̄std − setting', repeatability: 'UA dihitung terpisah untuk UUT dan standar', acceptance: 'Keduanya memenuhi toleransi Excel' },
   workbookRange: { title: 'Variasi rentang pengukuran', correction: 'R = nilai maksimum − nilai minimum', repeatability: 'Rentang seluruh bacaan min/maks', acceptance: 'R ≤ batas variasi Excel' },
+  customExpression: { title: 'Rumus kustom admin', correction: 'Mengikuti persamaan koreksi yang disimpan admin', repeatability: 'Mengikuti persamaan U95 yang disimpan admin', acceptance: 'Mengikuti aturan lulus yang disimpan admin' },
 };
 
 function performanceAcceptance(row: PerformanceSetting) {
@@ -30,6 +36,7 @@ function performanceAcceptance(row: PerformanceSetting) {
   if (row.formula === 'workbookMaximum') return `${row.includeUncertainty === false ? 'x̄' : 'x̄ + U95'} ≤ ${row.setting} ${row.unit}`;
   if (row.formula === 'workbookBand') return `${row.minimumSetting} ≤ x̄ ≤ ${row.maximumSetting} ${row.unit}`;
   if (row.formula === 'workbookRange') return `maks(bacaan) − min(bacaan) ≤ ${row.absoluteTolerance} ${row.unit}`;
+  if (row.formula === 'customExpression') return `Lulus jika ${row.customExpressions?.pass ?? 'aturan belum diatur'}`;
   const fixedTolerance = row.toleranceBySetting?.find((item) => Number(item.setting) === Number(row.setting))?.tolerance ?? row.absoluteTolerance;
   const hasPercent = Number(row.tolerancePercent) > 0;
   const tolerance = fixedTolerance && hasPercent
@@ -98,17 +105,28 @@ function FormulaCard({
   instrument,
   activeReferences,
   onReferenceChange,
+  onEdit,
+  draft,
+  activeRevision,
+  revisionHistory,
+  adminEditorUnavailable,
 }: {
-  instrument: (typeof instruments)[number];
+  instrument: Instrument;
   activeReferences?: MeasurementReferences;
   onReferenceChange?: (key: keyof MeasurementReferences, value: string) => void;
+  onEdit?: () => void;
+  draft?: InstrumentMethodDraft;
+  activeRevision?: InstrumentMethodRevision;
+  revisionHistory?: InstrumentMethodRevision[];
+  adminEditorUnavailable?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const formulaRows = instrument.performanceRows.filter((row, index, rows) => rows.findIndex((item) => item.formula === row.formula) === index);
   const isActiveWork = Boolean(activeReferences && onReferenceChange);
   const readingCounts = [...new Set(instrument.performanceRows.map((row) => row.count))].sort((a, b) => a - b);
   const templateId = getInstrumentTemplateId(instrument);
-  const occlusionLimit = templateId === 'syringe-pump' ? 21 : 20;
+  const activeMethodFormulas = instrumentFormulaFields(instrument);
+  const occlusionLimit = instrument.infusionPump?.occlusionLimit ?? (templateId === 'syringe-pump' ? 21 : 20);
   const methodSource = ['centrifuge', 'fetal-doppler', 'flowmeter', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId)
     ? { label: 'Metode Kerja Kemenkes 2024 · MK-24 (draf)', tone: 'wait' as const }
     : instrument.sphygmomanometer
@@ -137,74 +155,82 @@ function FormulaCard({
       <Text style={styles.formulaChevron}>{expanded ? '−' : '+'}</Text>
     </Pressable>
     {expanded ? <View style={styles.formulaBody}>
+      {onEdit ? <View style={styles.editorAction}>
+        <Badge text={`AKTIF v${instrument.methodVersion ?? 1}`} tone="good" />
+        {draft ? <Badge text={`DRAFT v${(instrument.methodVersion ?? 1) + 1}`} tone="wait" /> : null}
+        <ActionButton title={draft ? 'Lanjutkan draft metode' : 'Buat draft perubahan'} secondary onPress={onEdit} />
+        {activeRevision?.source ? <ValueLine label="Sumber versi aktif" value={activeRevision.source} /> : null}
+        {activeRevision?.reason ? <ValueLine label="Perubahan terakhir" value={activeRevision.reason} /> : null}
+        {activeRevision?.verifiedBy ? <ValueLine label="Diperiksa oleh" value={activeRevision.verifiedBy} /> : null}
+        {activeRevision?.effectiveDate ? <ValueLine label="Berlaku sejak" value={activeRevision.effectiveDate} /> : null}
+      </View> : null}
+      {onEdit && revisionHistory?.length ? <View style={styles.formulaGroup}>
+        <Text style={styles.formulaGroupTitle}>Riwayat perubahan metode</Text>
+        {[...revisionHistory].sort((a, b) => b.version - a.version).slice(0, 5).map((revision) => <View key={revision.version}>
+          <Badge text={`VERSI ${revision.version}`} tone="good" />
+          {revision.source ? <ValueLine label="Sumber" value={revision.source} /> : null}
+          {revision.reason ? <ValueLine label="Perubahan" value={revision.reason} /> : null}
+          {revision.verificationNote ? <ValueLine label="Hasil pembanding" value={revision.verificationNote} /> : null}
+          {revision.verifiedBy ? <ValueLine label="Diperiksa oleh" value={revision.verifiedBy} /> : null}
+          {revision.effectiveDate ? <ValueLine label="Berlaku sejak" value={revision.effectiveDate} /> : null}
+        </View>)}
+      </View> : null}
+      {activeMethodFormulas.length ? <View style={styles.formulaGroup}>
+        <Text style={styles.formulaGroupTitle}>Rumus aktif kalkulator</Text>
+        {activeMethodFormulas.map((field, index) => <FormulaStep key={field.key} number={String(index + 1)} title={field.label} equation={instrument.formulaExpressions?.[field.key] ?? field.expression} detail={field.detail} />)}
+      </View> : null}
+      <View style={styles.formulaGroup}>
+        <Text style={styles.formulaGroupTitle}>Bobot dan ambang skor</Text>
+        <ValueLine label="Kinerja" value={`${instrument.score.performanceWeight} poin · ambang ${instrument.score.performanceThreshold}%`} />
+        <ValueLine label="Fisik dan fungsi" value={`${instrument.score.physicalWeight} poin · ambang ${instrument.score.physicalThreshold ?? 70}%`} />
+        <ValueLine label="Status laik pakai" value={`Skor minimum ${instrument.score.overallPassThreshold ?? 70}%`} />
+      </View>
       {instrument.suctionPump ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik dan langkah pengukuran</Text>
           {instrument.suctionPump.pressurePoints.map((setting) => <ValueLine key={setting} label={`${Math.abs(setting)} mmHg vakum`} value="6 bacaan arah naik · 6 bacaan arah turun" />)}
-          <ValueLine label="Daya hisap maksimum" value={`Tekanan vakum ${instrument.suctionPump.minimumVacuumMmHg}–${instrument.suctionPump.maximumVacuumMmHg} mmHg · waktu ≤ 10 detik`} />
+          <ValueLine label="Daya hisap maksimum" value={`Tekanan vakum ${instrument.suctionPump.minimumVacuumMmHg}–${instrument.suctionPump.maximumVacuumMmHg} mmHg · waktu ≤ ${instrument.suctionPump.maximumVacuumSeconds} detik`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
           <FormulaStep number="1" title="Tanda bacaan" equation="x̄ = −rata-rata(bacaan DPM)" detail="Bacaan diisi tanpa tanda minus di form; aplikasi mengubahnya menjadi tekanan bertanda negatif seperti tabel scoring Excel." />
-          <FormulaStep number="2" title="Koreksi regresi drift" equation="Naik: C = 0,2940837 + 0,003441824 × x̄; Turun: C = 0,3211573 + 0,003504638 × x̄" detail={`Koefisien mengikuti lembar DRIFT untuk DPM nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3]}.`} />
-          <FormulaStep number="3" title="Ketidakpastian" equation="UA = s / √n; U95 = t(0,975; νeff) × √Σui²" detail="Komponen: resolusi DPM 20 mmHg, simpangan baku enam bacaan, drift sesuai setting/arah, dan U95 sertifikat DPM maksimum 0,31 mmHg; dibagi reliabilitas workbook." />
-          <FormulaStep number="4" title="Keputusan" equation="Galat = x̄ + C − setting; lulus jika |Galat / setting| ≤ 10%" detail="Workbook menghitung U95 untuk dilaporkan, tetapi kriteria lulus tekanan memakai persentase galat tanpa menambahkan U95." />
-        </View>
-        <View style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>Bobot skor</Text>
-          <ValueLine label="Keselamatan listrik" value="40 poin" />
-          <ValueLine label="Pemeriksaan fisik dan fungsi" value="10 poin · ambang 70%" />
-          <ValueLine label="Kinerja" value="50 poin jika semua tekanan dan waktu maksimum lulus" />
+          <FormulaStep number="2" title="Koreksi regresi drift" equation={instrument.formulaExpressions?.['suction.correction'] ?? 'intercept + slope * signedMean'} detail={`Koefisien arah naik dan turun mengikuti tabel aktif untuk DPM nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3]}.`} />
+          <FormulaStep number="3" title="Ketidakpastian" equation={`UA = ${instrument.formulaExpressions?.['suction.ua'] ?? 'standardDeviation / sqrt(n)'}; U95 = ${instrument.formulaExpressions?.['suction.u95'] ?? 'sqrt(uResolution^2 + ua^2 + uDrift^2 + uDpm^2) * k95'}`} detail="Komponen resolusi, drift, sertifikat, dan derajat kebebasan mengikuti konfigurasi metode aktif." />
+          <FormulaStep number="4" title="Keputusan" equation={`${instrument.formulaExpressions?.['suction.error'] ?? 'correctedMean - setting'}; ${instrument.formulaExpressions?.['suction.pressurePass'] ?? 'abs(error / setting) <= toleranceRatio'}`} detail="Rumus galat dan aturan lulus mengikuti metode aktif." />
         </View>
       </> : templateId === 'infusion-pump' || templateId === 'syringe-pump' ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Titik ukur laju aliran</Text>
-          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value="6 bacaan · toleransi 10%" />)}
+          {instrument.performanceRows.map((row) => <ValueLine key={row.id} label={`${row.setting} ${row.unit}`} value={`${row.count} bacaan · toleransi ${((instrument.infusionPump?.flowToleranceRatio ?? 0.1) * 100).toLocaleString('id-ID')}%`} />)}
           <ValueLine label="Occlusion" value={`Setting 100 mL/h · 6 bacaan · batas rata-rata ≤ ${occlusionLimit} psi`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi analyzer dan ketidakpastian</Text>
-          <FormulaStep number="1" title="Koreksi laju aliran" equation="C = interceptChannel + slopeChannel × x̄; x̄corr = x̄ + C" detail="Koefisien intercept dan slope berbeda pada Channel 1, 2, dan 3; dipilih di form pengerjaan." />
-          {(['Channel 1', 'Channel 2', 'Channel 3'] as const).map((channel, index) => {
-            const coefficients = [
-              [-0.0044382464, -0.6893402185, 0.0007131475, -0.3227629185],
-              [-0.0084894465, -0.9974586655, 0.0007349966, -0.1939037013],
-              [-0.0216394107, 0.0314763681, 0.0008032538, -0.0241376844],
-            ][index];
-            return <ValueLine key={channel} label={channel} value={`Flow b=${coefficients[0]} · a=${coefficients[1]} | Occlusion b=${coefficients[2]} · a=${coefficients[3]}`} />;
-          })}
-          <FormulaStep number="2" title="U95 tiap titik" equation="uc = √[(0,01/√3)² + (s/√3)² + (drift/√3)² + (U95 standar/2)²]; U95 = t × uc" detail="Drift dan U95 standar diinterpolasi dari tabel workbook pada setting uji. Derajat bebas efektif mengikuti reliabilitas 50, 2, 50, 50." />
-          <FormulaStep number="3" title="Keputusan laju aliran" equation="Galat = x̄corr − setting; lulus jika |Galat / setting| ≤ 10%" detail="U95 ditampilkan di hasil dan laporan. Rumus skor Excel menentukan lulus dari persentase galat terhadap setting." />
-          <FormulaStep number="4" title="Koreksi occlusion" equation="C = interceptChannel + slopeChannel × x̄; U95 dari resolusi 0,01 psi, bacaan berulang, dan sertifikat" detail={templateId === 'syringe-pump' ? 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 21 psi dari MK-24; Excel memakai 20 psi.' : 'Aplikasi membandingkan rata-rata enam bacaan mentah dengan batas 20 psi.'} />
-          <ValueLine label="Bobot skor" value="Keselamatan listrik 40 · fisik/fungsi 10 · kinerja 50 (nilai blok flow + occlusion minimal 170%)" />
+          <FormulaStep number="1" title="Koreksi laju aliran" equation={`C = ${instrument.formulaExpressions?.['pump.flowCorrection'] ?? 'intercept + slope * mean'}; x̄corr = ${instrument.formulaExpressions?.['pump.correctedMean'] ?? 'mean + correction'}`} detail="Koefisien tiap channel yang dipilih admin dipakai kalkulator." />
+          {instrument.infusionPump?.channels.map((channel) => <ValueLine key={channel.channel} label={channel.channel} value={`Flow intercept ${channel.flowIntercept} · slope ${channel.flowSlope} | Occlusion intercept ${channel.occlusionIntercept} · slope ${channel.occlusionSlope}`} />)}
+          <FormulaStep number="2" title="U95 tiap titik" equation={`UA = ${instrument.formulaExpressions?.['pump.ua'] ?? 'standardDeviation / sqrt(3)'}; U95 = ${instrument.formulaExpressions?.['pump.u95'] ?? 'sqrt(uResolution^2 + ua^2 + uDrift^2 + uCertificate^2) * k95'}`} detail="Drift, U95 sertifikat, dan derajat kebebasan mengikuti konfigurasi metode aktif." />
+          <FormulaStep number="3" title="Keputusan laju aliran" equation={`Nilai = ${instrument.formulaExpressions?.['pump.flowTestValue'] ?? 'abs(error / setting)'}; lulus = ${instrument.formulaExpressions?.['pump.flowPass'] ?? 'testValue <= tolerance'}`} detail="U95 dicatat untuk hasil; aturan lulus memakai persamaan metode aktif." />
+          <FormulaStep number="4" title="Occlusion" equation={`Koreksi = ${instrument.formulaExpressions?.['pump.occlusionCorrection'] ?? 'intercept + slope * mean'}; U95 = ${instrument.formulaExpressions?.['pump.occlusionU95'] ?? 'sqrt(uResolution^2 + ua^2 + uDpm^2) * k95'}; lulus = ${instrument.formulaExpressions?.['pump.occlusionPass'] ?? 'mean <= limit'}`} detail={`Batas occlusion aktif ${instrument.infusionPump?.occlusionLimit} psi.`} />
         </View>
       </> : instrument.sphygmomanometer ? <>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Alur dan batas pengujian</Text>
-          <FormulaStep number="1" title="Kebocoran" equation="Pompa 250 mmHg; ukur penurunan setelah 1 menit" detail="Batas pada rumus yang dipakai aplikasi: ≤ 15 mmHg." />
-          <FormulaStep number="2" title="Deflasi cepat" equation="Pompa 260 mmHg; ukur waktu deflasi" detail="Batas waktu: ≤ 10 detik." />
+          <FormulaStep number="1" title="Kebocoran" equation="Pompa 250 mmHg; ukur penurunan setelah 1 menit" detail={`Batas aktif: ≤ ${instrument.sphygmomanometer.leakageLimitMmHg} mmHg.`} />
+          <FormulaStep number="2" title="Deflasi cepat" equation="Pompa 260 mmHg; ukur waktu deflasi" detail={`Batas aktif: ≤ ${instrument.sphygmomanometer.deflationLimitSeconds} detik.`} />
           <FormulaStep number="3" title="Ketepatan tekanan" equation={`Setting ${instrument.sphygmomanometer.pressurePoints.join(', ')} mmHg · 3 bacaan DPM saat tekanan naik dan turun`} detail={`Sphygmomanometer ${instrument.sphygmomanometer.accuracyClass === 1 ? 'digital' : 'analog'} · tingkat ketelitian ${instrument.sphygmomanometer.accuracyClass} mmHg.`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi Digital Pressure Meter</Text>
-          <FormulaStep number="1" title="Interpolasi sertifikat" equation="C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)" detail="Koreksi dihitung terpisah untuk pembacaan naik dan turun." />
-          <FormulaStep number="2" title="Bacaan terkoreksi" equation="xi terkoreksi = xi DPM + C(xi DPM)" detail={`U95 sertifikat DPM = ${instrument.sphygmomanometer.dpmU95} mmHg. Kurva di bawah mengikuti nomor seri pada workbook.`} />
+          <FormulaStep number="1" title="Interpolasi sertifikat" equation={instrument.formulaExpressions?.['sphyg.interpolation'] ?? 'c1 + (x - x1) * (c2 - c1) / (x2 - x1)'} detail="Koreksi dihitung terpisah untuk pembacaan naik dan turun." />
+          <FormulaStep number="2" title="Bacaan terkoreksi" equation={instrument.formulaExpressions?.['sphyg.correctedReading'] ?? 'reading + correction'} detail={`U95 sertifikat DPM = ${instrument.sphygmomanometer.dpmU95} mmHg. Kurva di bawah mengikuti nomor seri pada workbook.`} />
           {instrument.sphygmomanometer.dpmCorrections.map((point) => <ValueLine key={point.pressure} label={`${point.pressure} mmHg`} value={`Naik ${point.up} · Turun ${point.down} mmHg`} />)}
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Koreksi, U95, dan keputusan</Text>
-          <FormulaStep number="1" title="Rata-rata dan koreksi" equation="x̄ = Σxi terkoreksi / 3; C = setting − x̄" detail="Simpangan baku s dihitung dari tiga bacaan DPM yang sudah dikoreksi." />
-          <FormulaStep number="2" title="Komponen ketidakpastian" equation={`u resolusi = (0,5 × tingkat ketelitian) / √6; u ulang = s / √3; u drift = drift / √3; u DPM = U95 sertifikat / 2`} detail="Nilai drift mengikuti tabel pada workbook dan arah tekanan." />
-          <FormulaStep number="3" title="U95 dan kelulusan" equation="uc = √Σui²; νeff = uc⁴ / Σ(ui⁴ / νi); U95 = max[t(0,975; νeff) × uc, 0,99 mmHg]" detail="Satu arah lulus jika |C| + U95 ≤ 4 mmHg." />
+          <FormulaStep number="1" title="Rata-rata dan koreksi" equation={`Koreksi = ${instrument.formulaExpressions?.['sphyg.correction'] ?? 'setting - mean'}; nilai keputusan = ${instrument.formulaExpressions?.['sphyg.decision'] ?? 'abs(correction) + u95'}`} detail="Simpangan baku s dihitung dari tiga bacaan DPM yang sudah dikoreksi." />
+          <FormulaStep number="2" title="Komponen ketidakpastian" equation={`Resolusi = ${instrument.formulaExpressions?.['sphyg.uResolution'] ?? '(0.5 * accuracyClass) / sqrt(6)'}; ulang = ${instrument.formulaExpressions?.['sphyg.uRepeatability'] ?? 'standardDeviation / sqrt(3)'}; drift = ${instrument.formulaExpressions?.['sphyg.uDrift'] ?? 'drift / sqrt(3)'}; DPM = ${instrument.formulaExpressions?.['sphyg.uDpm'] ?? 'dpmU95 / 2'}`} detail="Nilai drift mengikuti tabel pada workbook dan arah tekanan." />
+          <FormulaStep number="3" title="U95 dan kelulusan" equation={`U95 = ${instrument.formulaExpressions?.['sphyg.u95'] ?? 'max(k95 * sqrt(sumU2), minimumU95)'}; lulus = ${instrument.formulaExpressions?.['sphyg.pressurePass'] ?? 'decisionValue <= pressureTolerance'}`} detail="Persamaan keputusan tekanan mengikuti metode aktif." />
           {instrument.sphygmomanometer.drift.map((point) => <ValueLine key={point.pressure} label={`Drift ${point.pressure} mmHg`} value={`Naik ${point.up} · Turun ${point.down} mmHg`} />)}
-        </View>
-        <View style={styles.formulaGroup}>
-          <Text style={styles.formulaGroupTitle}>Bobot skor</Text>
-          <ValueLine label="Pemeriksaan fisik" value="10 poin · lulus jika minimal 70% bagian baik" />
-          <ValueLine label="Uji kebocoran" value="30 poin" />
-          <ValueLine label="Deflasi cepat" value="30 poin" />
-          <ValueLine label="Tekanan naik" value="15 poin · proporsional dari 6 titik lulus" />
-          <ValueLine label="Tekanan turun" value="15 poin · proporsional dari 6 titik lulus" />
         </View>
       </> : instrument.weighingScale ? <>
         <View style={styles.formulaGroup}>
@@ -219,11 +245,10 @@ function FormulaCard({
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Urutan perhitungan</Text>
-          <FormulaStep number="1" title="Daya ulang" equation="ri = indikasi − nol; x̄ = Σri / 10; s = √[Σ(ri − x̄)² / 9]" detail={`Simpangan baku yang dilaporkan di Excel = √(2/3) × (0,5 × d). Komponen u daya ulang = (0,5 × d) / 2.`} />
-          <FormulaStep number="2" title="Koreksi di tiap titik beban" equation="Massa acuan = Σ massa konvensional 2026; C = indikasi − massa acuan" detail="Aplikasi menjumlahkan massa acuan dari anak timbangan yang dipilih untuk titik tersebut." />
-          <FormulaStep number="3" title="Ketidakpastian baku gabungan" equation="uc = √(u resolusi² + u ulang² + u sertifikat² + u drift²)" detail={`u resolusi = (0,5 × d) / √${instrument.weighingScale.resolutionDivisor}; u sertifikat = (Σ U95 anak timbangan / 2) / 1000.`} />
-          <FormulaStep number="4" title="U95 dan keputusan" equation="νeff = uc⁴ / Σ(ui⁴ / 50); U95 = t(0,975; νeff) × uc" detail={`LOP = maksimum |C| + maksimum U95. Lulus jika LOP ≤ 10 × d = ${10 * instrument.weighingScale.resolutionKg} kg.`} />
-          <Text style={styles.subEquation}>u drift = [Σ{`{0,5 × (massa 2026 − massa 2025) / √3}`} / √3] / 1000</Text>
+          <FormulaStep number="1" title="Daya ulang" equation={`Simpangan baku laporan = ${instrument.formulaExpressions?.['weighing.reportSD'] ?? 'sqrt(2 / 3) * (0.5 * d)'}; u ulang = ${instrument.formulaExpressions?.['weighing.uRepeatability'] ?? '(0.5 * d) / 2'}`} detail="Hasil daya ulang memakai bacaan yang dimasukkan teknisi." />
+          <FormulaStep number="2" title="Koreksi di tiap titik beban" equation={`Massa acuan = ${instrument.formulaExpressions?.['weighing.referenceMass'] ?? 'sumMass2026G / 1000'}; C hitung = ${instrument.formulaExpressions?.['weighing.correction'] ?? 'indication - referenceMass'}; C LK = ${instrument.formulaExpressions?.['weighing.reportCorrection'] ?? 'referenceMass - indication'}`} detail="Aplikasi menjumlahkan massa acuan dari anak timbangan yang dipilih untuk titik tersebut." />
+          <FormulaStep number="3" title="Komponen ketidakpastian" equation={`Resolusi = ${instrument.formulaExpressions?.['weighing.uResolution'] ?? '(0.5 * d) / sqrt(resolutionDivisor)'}; sertifikat = ${instrument.formulaExpressions?.['weighing.uCertificate'] ?? '(sumCertificateU95G / 2) / 1000'}; drift = ${instrument.formulaExpressions?.['weighing.uDrift'] ?? '(0.5 * sumDriftDeltaG / sqrt(3) / sqrt(3)) / 1000'}`} detail="Komponen U95 memakai parameter metode aktif." />
+          <FormulaStep number="4" title="U95 dan keputusan" equation={`U95 = ${instrument.formulaExpressions?.['weighing.u95'] ?? 'sqrt(uResolution^2 + uRepeatability^2 + uCertificate^2 + uDrift^2) * k95'}; LOP = ${instrument.formulaExpressions?.['weighing.lop'] ?? 'maxCorrection + maxU95'}; lulus = ${instrument.formulaExpressions?.['weighing.pass'] ?? 'lop <= limit'}`} detail={`Batas LOP aktif ${instrument.formulaExpressions?.['weighing.limit'] ?? '10 * d'}.`} />
         </View>
         <View style={styles.formulaGroup}>
           <Text style={styles.formulaGroupTitle}>Parameter alat</Text>
@@ -247,10 +272,17 @@ function FormulaCard({
                 <FormulaStep number="2" title="Batas lulus" equation={performanceAcceptance(row)} detail="Batas variasi berbeda mengikuti suhu kontrol di workbook." />
               </> : <>
                 <FormulaStep number="1" title="Rata-rata dan simpangan baku" equation={row.formula === 'workbookPairedAccuracy' ? 'xi = (bacaan minimum_i + bacaan maksimum_i) / 2; x̄ = Σxi / n' : row.formula === 'workbookComparisonAccuracy' ? 'x̄UUT = ΣUUT_i / n; x̄standar = Σstandar_i / n' : 'x̄ = Σxi / n; s = √[Σ(xi − x̄)² / (n − 1)]'} detail={`n adalah jumlah bacaan pada tiap titik (${row.count}).`} />
-                <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
-                <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
-                <FormulaStep number="4" title={row.includeUncertainty === false ? 'Keputusan tanpa U95' : 'Ketidakpastian bentangan 95%'} equation={row.includeUncertainty === false ? 'U95 tidak ditambahkan ke keputusan, sesuai kriteria pada Excel.' : 'U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]'} detail={row.includeUncertainty === false ? 'Excel membandingkan rata-rata langsung dengan batas.' : 'Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan.'} />
-                <FormulaStep number="5" title="Batas lulus" equation={performanceAcceptance(row)} detail={row.formula === 'workbookComparisonAccuracy' ? 'UUT dan standar dinilai terpisah; keduanya harus lulus.' : row.formula === 'workbookPairedAccuracy' ? 'Setiap bacaan minimum dipasangkan dengan bacaan maksimum pada nomor yang sama.' : 'Batas dan arah pengujian mengikuti rumus pada workbook.'} />
+                {row.formula === 'customExpression' && row.customExpressions ? <>
+                  <FormulaStep number="2" title="Koreksi" equation={row.customExpressions.correction} detail="Persamaan koreksi aktif yang dipakai kalkulator." />
+                  <FormulaStep number="3" title="U95" equation={row.customExpressions.uncertainty} detail="Ketidakpastian dihitung sesuai persamaan metode." />
+                  <FormulaStep number="4" title="Toleransi dan nilai keputusan" equation={`${row.customExpressions.testValue}; batas ${row.customExpressions.tolerance}`} detail="Nilai keputusan dihitung dari input teknisi lalu dibandingkan dengan toleransi." />
+                  <FormulaStep number="5" title="Aturan lulus" equation={row.customExpressions.pass} detail="Persamaan ini menentukan status titik uji." />
+                </> : <>
+                  <FormulaStep number="2" title="Koreksi" equation={formula.correction} detail="Bandingkan rata-rata bacaan alat dengan nilai setting pada titik uji." />
+                  <FormulaStep number="3" title="Ketidakpastian dari bacaan berulang" equation={formula.repeatability} detail="s adalah simpangan baku sampel dari bacaan pada titik tersebut." />
+                  <FormulaStep number="4" title={row.includeUncertainty === false ? 'Keputusan tanpa U95' : 'Ketidakpastian bentangan 95%'} equation={row.includeUncertainty === false ? 'U95 tidak ditambahkan ke keputusan, sesuai kriteria pada Excel.' : 'U95 = 2 × √[UA² + (U sertifikat / 2)² + (res UUT / 2√3)² + (res kalibrator / 2√3)²]'} detail={row.includeUncertainty === false ? 'Excel membandingkan rata-rata langsung dengan batas.' : 'Komponen UA, sertifikat standar, resolusi alat yang diuji, dan resolusi kalibrator digabungkan.'} />
+                  <FormulaStep number="5" title="Batas lulus" equation={performanceAcceptance(row)} detail={row.formula === 'workbookComparisonAccuracy' ? 'UUT dan standar dinilai terpisah; keduanya harus lulus.' : row.formula === 'workbookPairedAccuracy' ? 'Setiap bacaan minimum dipasangkan dengan bacaan maksimum pada nomor yang sama.' : 'Batas dan arah pengujian mengikuti rumus pada workbook.'} />
+                </>}
               </>}
             </View>;
           })}
@@ -270,12 +302,15 @@ function FormulaCard({
         </View>
       </>}
       <Text style={styles.readOnlyNote}>{instrument.suctionPump
-        ? `Regresi koreksi dan drift/U95 terkunci pada Digital Pressure Meter ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}.`
+        ? `Kurva awal mengikuti Digital Pressure Meter ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'} dan dapat diubah admin pada versi metode.`
         : templateId === 'infusion-pump' || templateId === 'syringe-pump'
-          ? `Koefisien koreksi dan U95 mengikuti sertifikat Infusion Device Analyzer ${instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3] ?? 'yang tercantum di workbook'}; Channel dipilih pada form pengerjaan.`
+          ? `Koefisien awal dan U95 mengikuti sertifikat Infusion Device Analyzer ${instrument.standards.find(([name]) => name === 'Infusion Device Analyzer')?.[3] ?? 'yang tercantum di workbook'}; admin dapat menerbitkan perubahan metode. Channel dipilih pada form pengerjaan.`
         : instrument.sphygmomanometer
         ? `Kurva dan U95 DPM terikat pada nomor seri ${instrument.standards.find(([name]) => name === 'Digital Pressure Meter')?.[3] ?? 'yang tercantum di workbook'}. Standar dengan nomor seri lain belum bisa dihitung memakai kurva ini.`
-        : 'Rumus dan aturan hitung hanya untuk dibaca. Nilai acuan di atas bisa diedit khusus pada pekerjaan yang sedang dibuka.'}</Text>
+        : isActiveWork ? 'Rumus metode menjadi acuan pekerjaan ini. Nilai acuan di atas bisa diedit khusus untuk pekerjaan yang sedang dibuka.'
+          : adminEditorUnavailable ? 'Metode ini belum memiliki pola rumus atau kalkulator yang bisa diedit.'
+          : onEdit ? 'Admin bisa mengubah metode, pola rumus, titik uji, dan nilai acuan untuk pekerjaan baru.'
+            : 'Rumus mengikuti versi metode yang dipakai pada pekerjaan.'}</Text>
     </View> : null}
   </Card>;
 }
@@ -284,28 +319,89 @@ export function FormulasScreen() {
   const { recordId: rawRecordId } = useLocalSearchParams<{ recordId?: string }>();
   const recordId = Array.isArray(rawRecordId) ? rawRecordId[0] : rawRecordId;
   const { records, updateRecord } = useRecords();
+  const directory = useAdminData();
+  const { role } = useRole();
+  const [editingInstrument, setEditingInstrument] = useState<Instrument | null>(null);
+  const [editingEnvironment, setEditingEnvironment] = useState(false);
   const record = records.find((item) => item.id === recordId);
   const activeInstrument = record ? getRecordInstrument(record) : undefined;
+  const formulaInstruments = getConfiguredInstruments(directory.methodRevisions).map((instrument) => activeInstrument
+    && getInstrumentTemplateId(activeInstrument) === instrument.id ? activeInstrument : instrument);
+  const activeEnvironmentRevision = directory.environmentMethodRevisions.reduce<typeof directory.environmentMethodRevisions[number] | undefined>(
+    (latest, entry) => !latest || entry.version > latest.version ? entry : latest,
+    undefined,
+  );
+  const adminMethodList = role === 'admin' && !recordId;
+  const editorReady = adminMethodList && directory.loaded && !directory.storageError;
+  const supportsMethodEditor = (instrument: Instrument) => instrument.performanceRows.length > 0 || instrumentFormulaFields(instrument).length > 0;
   const updateReference = (key: keyof MeasurementReferences, value: string) => {
     if (!record) return;
     updateRecord(record.id, { data: { ...record.data, references: { ...record.data.references, [key]: value } } });
   };
 
-  return <ScreenPage title="Rumus" backLabel={record ? 'Pengerjaan' : 'Menu utama'} hint={record && activeInstrument ? `Rumus ${activeInstrument.name} dan alat lain bisa dibuka di bawah. Nilai acuan pekerjaan ada di rumus alat terkait.` : 'Pilih alat untuk melihat titik uji, urutan hitung, nilai acuan, dan batas lulusnya.'}>
+  return <>
+  <ScreenPage title="Rumus" backLabel={record ? 'Pengerjaan' : 'Menu utama'} hint={adminMethodList ? 'Admin menyiapkan draft. Versi aktif baru dipakai untuk pekerjaan setelah data acuan dan pemeriksaan hasil dilengkapi.' : record && activeInstrument ? `Rumus ${activeInstrument.name} dan alat lain bisa dibuka di bawah. Nilai acuan pekerjaan ada di rumus alat terkait.` : 'Pilih alat untuk melihat titik uji, urutan hitung, nilai acuan, dan batas lulusnya.'}>
     <Card>
       <Heading title="Kondisi lingkungan" hint="Suhu dan kelembapan ruangan dihitung terpisah memakai koreksi thermohygrometer acuan." />
       <Badge text="Excel + sertifikat thermohygrometer" />
-      <FormulaStep number="1" title="Cari koreksi dari sertifikat" equation="C(x) = C1 + (x − x1) × (C2 − C1) / (x2 − x1)" detail="Interpolasi di antara dua titik sertifikat yang mengapit bacaan." />
-      <FormulaStep number="2" title="Koreksi bacaan awal dan akhir" equation="Nilai terkoreksi = bacaan + C(bacaan)" detail="Koreksi awal dan akhir dicari masing-masing dari tabel sertifikat." />
-      <FormulaStep number="3" title="Ringkas kondisi ruangan" equation="Rata-rata = (awal terkoreksi + akhir terkoreksi) / 2; rentang = |awal − akhir|" detail="Rata-rata terkoreksi dicatat sebagai hasil suhu atau kelembapan ruangan." />
-      <FormulaStep number="4" title="Hitung ketidakpastian" equation="UA = s / √2; ures = (0,5 × 0,1) / √3; U95 = 2 × √(UA² + U sertifikat² + ures²)" detail="s dihitung dari bacaan awal dan akhir sebelum koreksi." />
+      {editorReady ? <View style={styles.editorAction}>
+        <Badge text={`AKTIF v${directory.environmentMethod.version}`} tone="good" />
+        {directory.environmentDraft ? <Badge text={`DRAFT v${directory.environmentMethod.version + 1}`} tone="wait" /> : null}
+        <ActionButton title={directory.environmentDraft ? 'Lanjutkan draft lingkungan' : 'Buat draft perubahan'} secondary onPress={() => setEditingEnvironment(true)} />
+        {activeEnvironmentRevision?.source ? <ValueLine label="Sumber versi aktif" value={activeEnvironmentRevision.source} /> : null}
+        {activeEnvironmentRevision?.reason ? <ValueLine label="Perubahan terakhir" value={activeEnvironmentRevision.reason} /> : null}
+        {activeEnvironmentRevision?.verificationNote ? <ValueLine label="Hasil pembanding" value={activeEnvironmentRevision.verificationNote} /> : null}
+        {activeEnvironmentRevision?.verifiedBy ? <ValueLine label="Diperiksa oleh" value={activeEnvironmentRevision.verifiedBy} /> : null}
+        {activeEnvironmentRevision?.effectiveDate ? <ValueLine label="Berlaku sejak" value={activeEnvironmentRevision.effectiveDate} /> : null}
+      </View> : null}
+      {editorReady && directory.environmentMethodRevisions.length ? <View style={styles.formulaGroup}>
+        <Text style={styles.formulaGroupTitle}>Riwayat versi rumus lingkungan</Text>
+        {[...directory.environmentMethodRevisions].sort((a, b) => b.version - a.version).slice(0, 5).map((revision) => <View key={revision.version}>
+          <Badge text={`VERSI ${revision.version}`} tone="good" />
+          {revision.source ? <ValueLine label="Sumber" value={revision.source} /> : null}
+          {revision.reason ? <ValueLine label="Perubahan" value={revision.reason} /> : null}
+          {revision.verificationNote ? <ValueLine label="Hasil pembanding" value={revision.verificationNote} /> : null}
+          {revision.verifiedBy ? <ValueLine label="Diperiksa oleh" value={revision.verifiedBy} /> : null}
+          {revision.effectiveDate ? <ValueLine label="Berlaku sejak" value={revision.effectiveDate} /> : null}
+        </View>)}
+      </View> : null}
+      <FormulaStep number="1" title="Cari koreksi dari sertifikat" equation={directory.environmentMethod.expressions.interpolation} detail="Interpolasi di antara dua titik sertifikat yang mengapit bacaan." />
+      <FormulaStep number="2" title="Koreksi bacaan awal dan akhir" equation={directory.environmentMethod.expressions.correctedReading} detail="Koreksi awal dan akhir dicari masing-masing dari tabel sertifikat." />
+      <FormulaStep number="3" title="Ringkas kondisi ruangan" equation={`Rata-rata: ${directory.environmentMethod.expressions.mean}; rentang: ${directory.environmentMethod.expressions.range}`} detail="Rata-rata terkoreksi dicatat sebagai hasil suhu atau kelembapan ruangan." />
+      <FormulaStep number="4" title="Hitung ketidakpastian" equation={`UA: ${directory.environmentMethod.expressions.ua}; u resolusi: ${directory.environmentMethod.expressions.uResolution}; U95: ${directory.environmentMethod.expressions.u95}`} detail="Formula kondisi lingkungan versi aktif diterapkan pada pekerjaan baru." />
     </Card>
+    {adminMethodList ? <StorageMessage message={directory.storageError} /> : null}
     <ExcelQuestionsCard />
-    {instruments.map((instrument) => <FormulaCard
+    {formulaInstruments.map((instrument) => <FormulaCard
       key={instrument.id}
       instrument={instrument}
       activeReferences={activeInstrument && getInstrumentTemplateId(activeInstrument) === instrument.id ? record?.data.references : undefined}
       onReferenceChange={activeInstrument && getInstrumentTemplateId(activeInstrument) === instrument.id ? updateReference : undefined}
+      onEdit={editorReady && supportsMethodEditor(instrument) ? () => setEditingInstrument(instrument) : undefined}
+      draft={directory.methodDrafts.find((entry) => entry.instrumentId === instrument.id)}
+      activeRevision={directory.methodRevisions.filter((entry) => entry.instrumentId === instrument.id).reduce<InstrumentMethodRevision | undefined>((latest, entry) => !latest || entry.version > latest.version ? entry : latest, undefined)}
+      revisionHistory={directory.methodRevisions.filter((entry) => entry.instrumentId === instrument.id)}
+      adminEditorUnavailable={adminMethodList && directory.loaded && !directory.storageError && !supportsMethodEditor(instrument)}
     />)}
-  </ScreenPage>;
+  </ScreenPage>
+    {editingEnvironment ? <EnvironmentFormulaModal
+      visible
+      method={directory.environmentMethod}
+      draft={directory.environmentDraft ?? undefined}
+      onClose={() => setEditingEnvironment(false)}
+      onSaveDraft={(method, metadata) => directory.saveEnvironmentMethodDraft(method, metadata)}
+      onPublish={(method, metadata) => directory.publishEnvironmentMethod(method, metadata)}
+      onDiscardDraft={directory.discardEnvironmentMethodDraft}
+    /> : null}
+    {editingInstrument ? <FormulaEditorModal
+      visible
+      instrument={editingInstrument}
+      version={editingInstrument.methodVersion ?? 0}
+      existingDraft={directory.methodDrafts.find((entry) => entry.instrumentId === editingInstrument.id)}
+      onClose={() => setEditingInstrument(null)}
+      onSaveDraft={(updated, metadata) => directory.saveInstrumentMethodDraft(updated, metadata)}
+      onPublish={(updated, metadata) => directory.publishInstrumentMethod(updated, metadata)}
+      onDiscardDraft={() => directory.discardInstrumentMethodDraft(editingInstrument.id)}
+    /> : null}
+  </>;
 }

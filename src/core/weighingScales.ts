@@ -27,6 +27,7 @@ const createScaleConfig = (capacityKg: number, resolutionKg: number, resolutionD
   resolutionKg,
   resolutionDivisor,
   repeatabilityLoadKg: 40,
+  degreesOfFreedom: [50, 50, 50, 50],
   points: adultScaleTestPoints,
 });
 

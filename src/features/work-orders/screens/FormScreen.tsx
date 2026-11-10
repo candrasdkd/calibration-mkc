@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ActionButton, Badge, Card, Heading } from '../../../components/ui';
 import { PickerField } from '../../../components/picker/PickerField';
@@ -7,8 +7,9 @@ import { PickerOption } from '../../../components/picker/PickerOption';
 import { SearchPickerModal } from '../../../components/picker/SearchPickerModal';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { calculateRecord } from '../../../core/calculations';
-import { getCustomEquipmentInstrument, getRecordInstrument, instruments } from '../../../core/instruments';
+import { getConfiguredInstruments, getCustomEquipmentInstrument, getRecordInstrument } from '../../../core/instruments';
 import type { Customer } from '../../../core/admin-data';
+import { useRole } from '../../home/hooks/useRole';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { useRecords } from '../hooks/useRecords';
 import { styles } from '../styles/FormScreenStyles';
@@ -17,9 +18,14 @@ function dateLabel(value: string) {
   return value ? value.split('-').reverse().join('-') : 'Tanggal belum diisi';
 }
 
+function newOrderGroupId() {
+  return `order-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function FormScreen() {
   const router = useRouter();
-  const { records, loaded, storageError, createRecord } = useRecords();
+  const { records, loaded, localReady, storageError, createRecord } = useRecords();
+  const { userName } = useRole();
   const directory = useAdminData();
   const [customerId, setCustomerId] = useState('');
   const [selectedInstrumentIds, setSelectedInstrumentIds] = useState<string[]>([]);
@@ -27,11 +33,12 @@ export function FormScreen() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [instrumentPickerOpen, setInstrumentPickerOpen] = useState(false);
   const [instrumentSearch, setInstrumentSearch] = useState('');
-  const availableInstruments = instruments.flatMap((instrument) => {
+  const [starting, setStarting] = useState(false);
+  const availableInstruments = getConfiguredInstruments(directory.methodRevisions).flatMap((instrument) => {
     const method = directory.equipmentMethods.find((item) => item.instrumentId === instrument.id)?.method.trim();
     return method ? [{ instrument, method }] : [];
   }).concat(directory.customEquipment.flatMap((entry) => {
-    const instrument = getCustomEquipmentInstrument(entry);
+    const instrument = getCustomEquipmentInstrument(entry, directory.methodRevisions);
     return instrument ? [{ instrument, method: entry.method }] : [];
   }));
   const customer = directory.customers.find((item) => item.id === customerId);
@@ -41,7 +48,7 @@ export function FormScreen() {
   const normalizedInstrumentSearch = instrumentSearch.trim().toLowerCase();
   const filteredInstruments = availableInstruments.filter(({ instrument, method }) => !normalizedInstrumentSearch
     || `${instrument.name} ${instrument.subtitle} ${method}`.toLowerCase().includes(normalizedInstrumentSearch));
-  const blocked = !loaded || !directory.loaded || Boolean(storageError || directory.storageError);
+  const blocked = !loaded || !localReady || !directory.localReady;
   const activeTaskGroups = useMemo(() => {
     const groups = new Map<string, {
       customer: string;
@@ -51,7 +58,6 @@ export function FormScreen() {
       rows: { id: string; instrument: string; details: string; updatedAt: string }[];
     }>();
     for (const record of records) {
-      if (record.isDemo) continue;
       const instrument = getRecordInstrument(record);
       if (!instrument || calculateRecord(instrument, record.data).complete) continue;
       const identity = record.data.identity;
@@ -82,14 +88,22 @@ export function FormScreen() {
     : [...current, id]);
 
   const startWork = () => {
-    if (blocked || !customer || !selectedInstrumentIds.length) return;
-    const created = [...selectedInstrumentIds].reverse()
-      .flatMap((id) => availableInstruments.filter(({ instrument }) => instrument.id === id))
-      .map(({ instrument, method }) => createRecord(instrument, method, customer))
-      .filter((id): id is string => Boolean(id));
-    if (created.length) {
-      setSelectedInstrumentIds([]);
-      setCustomerId('');
+    if (blocked || starting || !customer || !selectedInstrumentIds.length) return;
+    setStarting(true);
+    try {
+      const orderGroupId = newOrderGroupId();
+      const created = [...selectedInstrumentIds].reverse()
+        .flatMap((id) => availableInstruments.filter(({ instrument }) => instrument.id === id))
+        .map(({ instrument, method }) => createRecord(instrument, method, customer, directory.environmentMethod, userName, orderGroupId))
+        .filter((id): id is string => Boolean(id));
+      if (created.length) {
+        setSelectedInstrumentIds([]);
+        setCustomerId('');
+      } else throw new Error('Draft pengerjaan tidak berhasil dibuat.');
+    } catch (error) {
+      Alert.alert('Order gagal dibuat', error instanceof Error ? error.message : 'Periksa koneksi lalu coba lagi.');
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -124,7 +138,7 @@ export function FormScreen() {
           label="Pelanggan"
           value={customer ? `${customer.name} · ${customer.city}` : ''}
           placeholder={directory.loaded ? 'Pilih rumah sakit / klinik' : 'Memuat pelanggan…'}
-          disabled={!directory.loaded || !directory.customers.length || Boolean(directory.storageError)}
+          disabled={!directory.localReady || !directory.customers.length}
           onPress={() => { setCustomerSearch(''); setCustomerPickerOpen(true); }}
         />
         {directory.loaded && !directory.customers.length ? <Text style={styles.helperText}>Belum ada pelanggan. Admin perlu menambahkannya di menu Data pelanggan.</Text> : null}
@@ -159,9 +173,9 @@ export function FormScreen() {
           ? `${selectedInstrumentIds.length} draft akan dibuat untuk ${customer?.name ?? 'pelanggan terpilih'}. Setelah disimpan, pilih alat yang mau dikerjakan dulu.`
           : 'Pilih pelanggan dan minimal satu jenis alat untuk membuat task.'}</Text>
         <ActionButton
-          title={selectedInstrumentIds.length ? `Buat draft · ${selectedInstrumentIds.length} alat` : 'Buat draft pengerjaan'}
+          title={starting ? 'Menyimpan draft…' : selectedInstrumentIds.length ? `Buat draft · ${selectedInstrumentIds.length} alat` : 'Buat draft pengerjaan'}
           onPress={startWork}
-          disabled={blocked || !customer || !selectedInstrumentIds.length}
+          disabled={blocked || starting || !customer || !selectedInstrumentIds.length}
         />
       </Card>
     </> : null}

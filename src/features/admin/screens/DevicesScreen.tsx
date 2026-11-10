@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ActionButton, Badge, Card, Choice, ConfirmModal, DisclosureChevron, Field, Heading, SearchField } from '../../../components/ui';
+import { ActionButton, Card, Choice, ConfirmModal, DisclosureChevron, Field, Heading, SearchField } from '../../../components/ui';
 import { useAdminData } from '../hooks/useAdminData';
 import type { MeasuringDevice, ThermohygrometerCertificate, WeighingStandardCalibration } from '../../../core/admin-data';
 import { ScreenPage } from '../../../components/ScreenPage';
@@ -16,7 +16,7 @@ const blankCertificate = (): ThermohygrometerCertificate => ({
 });
 
 const blankWeighingStandard = (): WeighingStandardCalibration => ({ nominalKg: '', uncertaintyU95G: '', conventionalMass2025G: '', conventionalMass2026G: '' });
-const blankDevice = (): MeasuringDevice => ({ id: '', name: '', brand: '', model: '', serial: '', isThermohygrometer: false, certificate: null, weighingStandard: null, isDemo: false });
+const blankDevice = (): MeasuringDevice => ({ id: '', name: '', brand: '', model: '', serial: '', isThermohygrometer: false, certificate: null, weighingStandard: null });
 
 export function DevicesScreen() {
   const data = useAdminData();
@@ -95,7 +95,6 @@ export function DevicesScreen() {
               <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setSelectedSerial(selected ? null : device.id)} style={[styles.serialRow, selected && styles.serialRowSelected]}>
                 <View style={styles.serialIndex}><Text style={styles.serialIndexText}>{String(index + 1).padStart(2, '0')}</Text></View>
                 <View style={styles.serialCopy}><Text style={styles.serialNumber}>{device.serial}</Text><Text style={styles.serialMeta}>{device.brand} · {device.model}</Text></View>
-                {device.isDemo ? <Badge text="Contoh" tone="wait" /> : null}
               </Pressable>
               {selected ? <View style={styles.serialDetail}>
                 <View style={styles.detailLine}><Text style={styles.blockLabel}>MEREK</Text><Text style={styles.detailValue}>{device.brand}</Text></View>
@@ -120,14 +119,14 @@ export function DevicesScreen() {
         </View> : null}
       </Card>;
     }) : <Card style={styles.emptyState}><Heading title={query ? 'Standar tidak ditemukan' : 'Belum ada standar'} hint={query ? 'Coba kata kunci lain atau hapus pencarian.' : 'Tambahkan standar kalibrasi untuk menggunakannya pada pengerjaan.'} /></Card>}
-    <Modal visible={Boolean(editing)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
+    <Modal visible={Boolean(editing) && !confirmation} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditing(null)}>
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.deviceModalHeader}>
             <Text style={styles.deviceModalTitle}>{editing?.id ? 'Ubah standar' : 'Standar baru'}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Tutup form standar" onPress={() => setEditing(null)}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable>
           </View>
-          {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
+          {editing ? <ScrollView style={styles.deviceModalScroll} contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled">
             <Card>
               <Field label="Nama jenis standar" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
               <Text style={styles.groupInstruction}>Samakan nama ini dengan jenis standar yang diminta di Katalog Alkes, misalnya Thermohygrometer atau Tachometer.</Text>
@@ -166,9 +165,14 @@ export function DevicesScreen() {
                 <Field label="Massa konvensional 2025" value={editing.weighingStandard.conventionalMass2025G} onChange={(conventionalMass2025G) => updateWeighingStandard((standard) => ({ ...standard, conventionalMass2025G }))} keyboard="decimal-pad" suffix="g" />
                 <Field label="Massa konvensional 2026" value={editing.weighingStandard.conventionalMass2026G} onChange={(conventionalMass2026G) => updateWeighingStandard((standard) => ({ ...standard, conventionalMass2026G }))} keyboard="decimal-pad" suffix="g" />
               </> : null}
-              <View style={styles.actions}><ActionButton title="Simpan standar" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
             </Card>
           </ScrollView> : null}
+          {editing ? <View style={styles.deviceModalFooter}>
+            <View style={[styles.actions, styles.deviceModalFooterActions]}>
+              <View style={styles.deviceModalFooterAction}><ActionButton title="Simpan standar" onPress={save} disabled={locked} /></View>
+              <View style={styles.deviceModalFooterAction}><ActionButton title="Batal" secondary onPress={() => setEditing(null)} /></View>
+            </View>
+          </View> : null}
         </KeyboardAvoidingView>
       </SafeAreaView></SafeAreaProvider>
     </Modal>

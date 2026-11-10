@@ -13,4 +13,8 @@ export const styles = StyleSheet.create({
   errorText: { color: colors.danger, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 10 },
   action: { marginBottom: 9 },
   missingText: { color: colors.amber, backgroundColor: colors.amberSoft, borderRadius: 12, padding: 12, fontSize: 12, lineHeight: 18, marginTop: 6 },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  photoItem: { width: '48%', gap: 6 },
+  photoImage: { width: '100%', height: 130, borderRadius: 12, backgroundColor: colors.canvas },
+  photoLabel: { color: colors.muted, fontSize: 12, fontWeight: '700' },
 });

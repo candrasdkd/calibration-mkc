@@ -13,6 +13,7 @@ import { calculateRecord } from '../../../core/calculations';
 import { getInstrumentTemplateId, getRecordInstrument } from '../../../core/instruments';
 import { useAdminData } from '../../admin/hooks/useAdminData';
 import { useRecords } from '../../work-orders/hooks/useRecords';
+import { useRole } from '../../home/hooks/useRole';
 import type { MeasuringDevice, ThermohygrometerCertificate } from '../../../core/admin-data';
 import { styles } from '../styles/CalibrationScreenStyles';
 import type { FieldUpdate, InspectionUpdate, PerformanceUpdate } from '../types/CalibrationForm';
@@ -89,9 +90,12 @@ function IdentityStep({ data, instrument, update }: { data: CalibrationData; ins
         </View>
       </View> : <Text style={styles.customerMissing}>Pelanggan belum tersimpan pada pekerjaan ini. Buat pekerjaan baru dari pilihan pelanggan dan alat agar identitas pelanggan tercatat.</Text>}
       <Text style={styles.dateHint}>Ketuk kolom tanggal untuk membuka kalender.</Text>
-      {fields.slice(6).map(([key, label]) => key.endsWith('Date')
-        ? <DateField key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />
-        : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
+      <Text style={styles.dateHint}>Nama petugas mengikuti akun yang login.</Text>
+      {fields.slice(6).map(([key, label]) => key === 'technician'
+        ? <Field key={key} label={label} value={data.identity.technician} onChange={() => {}} editable={false} />
+        : key.endsWith('Date')
+          ? <DateField key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />
+          : <Field key={key} label={label} value={data.identity[key]} onChange={(value) => update('identity', key, value)} />)}
     </Card>
   </>;
 }
@@ -213,7 +217,7 @@ function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onRefe
             const chosen = selectedIds.has(device.id);
             const unavailable = chosenInGroup && !chosen;
             const profile = thermohygrometerProfile(device);
-            return <PickerOption key={device.id} index={index + 1} label={device.serial} detail={`${device.brand} · ${device.model}`} selected={chosen} disabled={unavailable} status={chosen ? 'Dipilih' : unavailable ? 'Nama sudah dipilih' : 'Pilih'} statusTone={chosen ? 'good' : unavailable ? 'wait' : 'neutral'} onPress={() => onToggle(deviceSnapshot(device), profile)} accessory={device.isDemo ? <Badge text="Contoh" tone="wait" /> : null}>
+            return <PickerOption key={device.id} index={index + 1} label={device.serial} detail={`${device.brand} · ${device.model}`} selected={chosen} disabled={unavailable} status={chosen ? 'Dipilih' : unavailable ? 'Nama sudah dipilih' : 'Pilih'} statusTone={chosen ? 'good' : unavailable ? 'wait' : 'neutral'} onPress={() => onToggle(deviceSnapshot(device), profile)}>
               {device.isThermohygrometer && !profile ? <Text style={styles.deviceWarning}>Data koreksi sertifikat belum lengkap.</Text> : null}
             </PickerOption>;
           })}</View> : null}
@@ -228,7 +232,7 @@ function SelectDevicesStep({ instrument, data, devices, loaded, onToggle, onRefe
         const chosen = current.some((weight) => weight.serial === standard.serial);
         const nextTotal = current.reduce((sum, weight) => sum + weight.nominalKg, 0) + (chosen ? 0 : standard.nominalKg);
         const exceedsPoint = !chosen && nextTotal > activeWeightPoint.loadKg + 1e-6;
-        return <PickerOption key={device.id} index={index + 1} label={`${device.name} · ${standard.nominalKg} kg`} detail={`${device.brand} · ${device.model} · S/N ${standard.serial} · U95 ${standard.uncertaintyU95G} g`} selected={chosen} disabled={exceedsPoint} status={chosen ? 'Dipilih' : exceedsPoint ? 'Melebihi beban' : 'Pilih'} statusTone={chosen ? 'good' : exceedsPoint ? 'wait' : 'neutral'} accessory={device.isDemo ? <Badge text="Contoh" tone="wait" /> : null} onPress={() => {
+        return <PickerOption key={device.id} index={index + 1} label={`${device.name} · ${standard.nominalKg} kg`} detail={`${device.brand} · ${device.model} · S/N ${standard.serial} · U95 ${standard.uncertaintyU95G} g`} selected={chosen} disabled={exceedsPoint} status={chosen ? 'Dipilih' : exceedsPoint ? 'Melebihi beban' : 'Pilih'} statusTone={chosen ? 'good' : exceedsPoint ? 'wait' : 'neutral'} onPress={() => {
           const weights = chosen ? current.filter((weight) => weight.serial !== standard.serial) : [...current, standard];
           onToggleWeights(weightPoints.findIndex((point) => point.id === activeWeightPoint.id), weights);
         }} />;
@@ -419,11 +423,12 @@ function WeighingStep({ instrument, data, result, updatePoint, updateRepeatabili
   </>;
 }
 
-function PressureDirectionTable({ title, direction, data, results, onReading }: {
+function PressureDirectionTable({ title, direction, data, results, tolerance, onReading }: {
   title: string;
   direction: 'up' | 'down';
   data: SphygmomanometerData['pressureReadings'];
   results: NonNullable<CalculationResult['sphygmomanometer']>['pressureReadings'];
+  tolerance: number;
   onReading: (setting: number, direction: 'up' | 'down', index: number, value: string) => void;
 }) {
   const outcome = (pass: boolean | null) => <Badge text={pass === null ? 'MENUNGGU' : pass ? 'LULUS' : 'TIDAK LULUS'} tone={pass === null ? 'wait' : pass ? 'good' : 'bad'} />;
@@ -445,7 +450,7 @@ function PressureDirectionTable({ title, direction, data, results, onReading }: 
           </View>
           {calculated ? <View style={styles.pressureStats}>
             <View style={styles.resultLine}><Text style={styles.pressureStatsText}>x̄ terkoreksi {fmt(calculated.mean)} · C {fmt(calculated.correction)} · U95 {fmt(calculated.uncertaintyU95)}</Text>{outcome(calculated.pass)}</View>
-            <Text style={styles.pressureStatsText}>|C| + U95 {fmt(calculated.decisionValue)} / 4 mmHg</Text>
+            <Text style={styles.pressureStatsText}>|C| + U95 {fmt(calculated.decisionValue)} / {fmt(tolerance)} mmHg</Text>
           </View> : null}
         </View>;
       })}
@@ -453,9 +458,10 @@ function PressureDirectionTable({ title, direction, data, results, onReading }: 
   </View>;
 }
 
-function SphygmomanometerStep({ data, result, onChange }: {
+function SphygmomanometerStep({ data, result, config, onChange }: {
   data: SphygmomanometerData;
   result: NonNullable<CalculationResult['sphygmomanometer']>;
+  config: NonNullable<Instrument['sphygmomanometer']>;
   onChange: (data: SphygmomanometerData) => void;
 }) {
   const updateReading = (setting: number, direction: 'up' | 'down', index: number, value: string) => onChange({
@@ -469,15 +475,15 @@ function SphygmomanometerStep({ data, result, onChange }: {
   return <>
     <CollapsibleCard title="Uji kebocoran" hint="Pompa hingga 250 mmHg, lalu catat penurunan tekanan setelah 1 menit.">
       <Field label="Penurunan tekanan" value={data.leakageDrop} onChange={(value) => onChange({ ...data, leakageDrop: value })} keyboard="decimal-pad" suffix="mmHg" />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas penurunan ≤ 15 mmHg</Text>{outcome(result.leakageDrop.pass)}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas penurunan ≤ {config.leakageLimitMmHg} mmHg</Text>{outcome(result.leakageDrop.pass)}</View>
     </CollapsibleCard>
     <CollapsibleCard title="Uji deflasi cepat" hint="Pompa hingga 260 mmHg, buka valve dan catat waktu deflasi.">
       <Field label="Waktu deflasi" value={data.rapidDeflationSeconds} onChange={(value) => onChange({ ...data, rapidDeflationSeconds: value })} keyboard="decimal-pad" suffix="detik" />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.rapidDeflationSeconds.pass)}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ {config.deflationLimitSeconds} detik</Text>{outcome(result.rapidDeflationSeconds.pass)}</View>
     </CollapsibleCard>
     <CollapsibleCard title="Uji ketepatan tekanan" hint="Isi tabel tekanan naik sampai selesai, lalu lanjutkan ke tabel tekanan turun. Setiap setting memakai tiga bacaan Digital Pressure Meter.">
-      <PressureDirectionTable title="1. Tekanan naik" direction="up" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
-      <PressureDirectionTable title="2. Tekanan turun" direction="down" data={data.pressureReadings} results={result.pressureReadings} onReading={updateReading} />
+      <PressureDirectionTable title="1. Tekanan naik" direction="up" data={data.pressureReadings} results={result.pressureReadings} tolerance={config.pressureToleranceMmHg} onReading={updateReading} />
+      <PressureDirectionTable title="2. Tekanan turun" direction="down" data={data.pressureReadings} results={result.pressureReadings} tolerance={config.pressureToleranceMmHg} onReading={updateReading} />
     </CollapsibleCard>
   </>;
 }
@@ -524,7 +530,7 @@ function SuctionPumpStep({ data, result, config, onChange }: {
       <Field label="Bacaan tekanan vakum maksimum" value={data.maximumVacuumReading} onChange={(value) => onChange({ ...data, maximumVacuumReading: value })} keyboard="decimal-pad" suffix="mmHg · isi besar vakum" />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>{legacy ? 'Batas vakum ≥ 300 mmHg' : `Batas vakum ${config.minimumVacuumMmHg}–${config.maximumVacuumMmHg} mmHg`}</Text>{outcome(result.maximumVacuumReadingPass)}</View>
       <Field label="Waktu mencapai vakum maksimum" value={data.maximumVacuumSeconds} onChange={(value) => onChange({ ...data, maximumVacuumSeconds: value })} keyboard="decimal-pad" suffix="detik" />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ 10 detik</Text>{outcome(result.maximumVacuumPass)}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Batas waktu ≤ {config.maximumVacuumSeconds} detik</Text>{outcome(result.maximumVacuumPass)}</View>
     </CollapsibleCard>
   </>;
 }
@@ -551,7 +557,7 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
     {result.safety ? <SafetyStep data={data} update={update} safetyResult={result.safety} /> : null}
     {templateId === 'fetal-doppler' ? <FetalSafetyStep data={data} update={update} /> : null}
     {instrument.sphygmomanometer && data.sphygmomanometer && result.sphygmomanometer
-      ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} onChange={updateSphygmomanometer} />
+      ? <SphygmomanometerStep data={data.sphygmomanometer} result={result.sphygmomanometer} config={instrument.sphygmomanometer!} onChange={updateSphygmomanometer} />
       : instrument.weighingScale ? <WeighingStep instrument={instrument} data={data} result={result} updatePoint={updateWeighingPoint} updateRepeatability={updateWeighingRepeatability} />
         : instrument.suctionPump ? null : <CollapsibleCard title="Pengujian kinerja" hint={templateId === 'flowmeter' ? 'Batas toleransi ±20% dari setting; setiap titik memakai lima bacaan.' : 'Masukkan setiap bacaan seperti yang terbaca pada alat standar.'}>
           {infusionResult && infusionPump ? <Choice label="Channel Infusion Device Analyzer" value={infusionPump.channel} onChange={(channel) => updateInfusionPump({ ...infusionPump, channel })} options={['Channel 1', 'Channel 2', 'Channel 3'].map((channel) => ({ value: channel, label: channel }))} /> : null}
@@ -613,10 +619,11 @@ function MeasurementStep({ data, instrument, result, update, updateInspection, u
   </>;
 }
 
-function PressureResultTable({ title, direction, pressureReadings }: {
+function PressureResultTable({ title, direction, pressureReadings, tolerance }: {
   title: string;
   direction: 'up' | 'down';
   pressureReadings: NonNullable<CalculationResult['sphygmomanometer']>['pressureReadings'];
+  tolerance: number;
 }) {
   return <>
     <Text style={styles.pressureDirectionTitle}>{title}</Text>
@@ -628,7 +635,7 @@ function PressureResultTable({ title, direction, pressureReadings }: {
           <Text style={[styles.pressureResultCell, styles.pressureResultMean]}>Rata-rata terkoreksi</Text>
           <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>Koreksi C</Text>
           <Text style={[styles.pressureResultCell, styles.pressureResultNarrow]}>U95</Text>
-          <Text style={[styles.pressureResultCell, styles.pressureResultDecision]}>|C| + U95</Text>
+          <Text style={[styles.pressureResultCell, styles.pressureResultDecision]}>|C| + U95 ≤ {fmt(tolerance)}</Text>
           <Text style={[styles.pressureResultCell, styles.pressureResultOutcome]}>Hasil</Text>
         </View>
         {pressureReadings.map((point) => {
@@ -651,10 +658,11 @@ function PressureResultTable({ title, direction, pressureReadings }: {
 }
 
 function ResultStep({ data, result, instrument }: { data: CalibrationData; result: CalculationResult; instrument: Instrument }) {
-  const tone = result.complete ? result.score !== null && result.score >= 70 ? 'good' : 'bad' : 'wait';
+  const passThreshold = instrument.score.overallPassThreshold ?? 70;
+  const tone = result.complete ? result.score !== null && result.score >= passThreshold ? 'good' : 'bad' : 'wait';
   const legacySuction = data.suctionPump?.pressureReadings.some((point) => point.up.length === 3) ?? false;
   return <>
-    <Card style={result.complete && result.score !== null && result.score < 70 ? styles.badOutcome : styles.goodOutcome}>
+    <Card style={result.complete && result.score !== null && result.score < passThreshold ? styles.badOutcome : styles.goodOutcome}>
       <Text style={styles.outcomeKicker}>{result.complete ? 'HASIL PENGUJIAN' : 'STATUS PENGISIAN'}</Text>
       <Text style={styles.outcomeTitle}>{result.complete ? result.status : 'Data belum lengkap'}</Text>
       <Text style={styles.outcomeScore}>{result.score === null ? '—' : `${result.score} / 100`}</Text>
@@ -682,10 +690,10 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
       {result.safety.checks.map((item) => <View key={item.label} style={styles.resultLine}><Text style={styles.resultLabel}>{item.label}</Text><Badge text={item.result === null ? 'KOSONG' : item.result ? 'LULUS' : 'TIDAK LULUS'} tone={item.result === null ? 'wait' : item.result ? 'good' : 'bad'} /></View>)}
     </Card> : null}
     {result.sphygmomanometer ? <Card><Heading title="Hasil sphygmomanometer" />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Uji kebocoran · {fmt(result.sphygmomanometer.leakageDrop.value)} mmHg / batas 15 mmHg</Text>{result.sphygmomanometer.leakageDrop.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.leakageDrop.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.leakageDrop.pass ? 'good' : 'bad'} />}</View>
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Deflasi cepat · {fmt(result.sphygmomanometer.rapidDeflationSeconds.value)} detik / batas 10 detik</Text>{result.sphygmomanometer.rapidDeflationSeconds.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'good' : 'bad'} />}</View>
-      <PressureResultTable title="1. Tekanan naik" direction="up" pressureReadings={result.sphygmomanometer.pressureReadings} />
-      <PressureResultTable title="2. Tekanan turun" direction="down" pressureReadings={result.sphygmomanometer.pressureReadings} />
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Uji kebocoran · {fmt(result.sphygmomanometer.leakageDrop.value)} mmHg / batas {instrument.sphygmomanometer?.leakageLimitMmHg} mmHg</Text>{result.sphygmomanometer.leakageDrop.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.leakageDrop.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.leakageDrop.pass ? 'good' : 'bad'} />}</View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Deflasi cepat · {fmt(result.sphygmomanometer.rapidDeflationSeconds.value)} detik / batas {instrument.sphygmomanometer?.deflationLimitSeconds} detik</Text>{result.sphygmomanometer.rapidDeflationSeconds.pass === null ? <Badge text="MENUNGGU" tone="wait" /> : <Badge text={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.sphygmomanometer.rapidDeflationSeconds.pass ? 'good' : 'bad'} />}</View>
+      <PressureResultTable title="1. Tekanan naik" direction="up" pressureReadings={result.sphygmomanometer.pressureReadings} tolerance={instrument.sphygmomanometer?.pressureToleranceMmHg ?? 4} />
+      <PressureResultTable title="2. Tekanan turun" direction="down" pressureReadings={result.sphygmomanometer.pressureReadings} tolerance={instrument.sphygmomanometer?.pressureToleranceMmHg ?? 4} />
     </Card> : result.suctionPump ? <Card><Heading title="Hasil pengujian suction pump" />
       {result.suctionPump.pressureReadings.map((point) => (['up', 'down'] as const).map((direction) => {
         const item = point[direction];
@@ -695,12 +703,12 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
           <ValueLine label="Rata-rata terkoreksi" value={item ? `${fmt(item.correctedMean)} mmHg` : '—'} />
           <ValueLine label="Koreksi drift" value={item ? `${fmt(item.correction)} mmHg` : '—'} />
           <ValueLine label="U95" value={item ? `${fmt(item.uncertaintyU95)} mmHg` : '—'} />
-          <ValueLine label="Galat / toleransi 10%" value={item ? `${fmt(item.error)} mmHg / ${fmt(Math.abs(item.error / point.setting) * 100, 2)}%` : '—'} />
+          <ValueLine label={`Galat / toleransi ${fmt((instrument.suctionPump?.pressureToleranceRatio ?? 0.1) * 100, 2)}%`} value={item ? `${fmt(item.error)} mmHg / ${fmt(Math.abs(item.error / point.setting) * 100, 2)}%` : '—'} />
         </View>;
       }))}
       <View style={styles.resultLine}><Text style={styles.resultLabel}>{legacySuction ? 'Tekanan maksimum / batas ≥ 300 mmHg' : `Tekanan maksimum / batas ${instrument.suctionPump?.minimumVacuumMmHg}–${instrument.suctionPump?.maximumVacuumMmHg} mmHg`}</Text><Badge text={result.suctionPump.maximumVacuumReadingPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumReadingPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumReadingPass === null ? 'wait' : result.suctionPump.maximumVacuumReadingPass ? 'good' : 'bad'} /></View>
       <ValueLine label="Tekanan terukur" value={result.suctionPump.maximumVacuumReading === null ? '—' : `${fmt(result.suctionPump.maximumVacuumReading)} mmHg`} />
-      <View style={styles.resultLine}><Text style={styles.resultLabel}>Waktu mencapai vakum maksimum / batas 10 detik</Text><Badge text={result.suctionPump.maximumVacuumPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumPass === null ? 'wait' : result.suctionPump.maximumVacuumPass ? 'good' : 'bad'} /></View>
+      <View style={styles.resultLine}><Text style={styles.resultLabel}>Waktu mencapai vakum maksimum / batas {instrument.suctionPump?.maximumVacuumSeconds} detik</Text><Badge text={result.suctionPump.maximumVacuumPass === null ? 'MENUNGGU' : result.suctionPump.maximumVacuumPass ? 'LULUS' : 'TIDAK LULUS'} tone={result.suctionPump.maximumVacuumPass === null ? 'wait' : result.suctionPump.maximumVacuumPass ? 'good' : 'bad'} /></View>
       <ValueLine label="Waktu terukur" value={result.suctionPump.maximumVacuumSeconds === null ? '—' : `${fmt(result.suctionPump.maximumVacuumSeconds)} detik`} />
     </Card> : result.weighing ? <Card><Heading title="Hasil pengujian timbangan" />
       <ValueLine label="Rata-rata uji berulang" value={result.weighing.repeatabilityMean === null ? 'Belum lengkap' : `${fmt(result.weighing.repeatabilityMean, 4)} kg`} />
@@ -708,7 +716,7 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
       <ValueLine label="Nilai SD pada laporan Excel" value={`${fmt(result.weighing.reportStandardDeviation, 6)} kg`} />
       <ValueLine label="Koreksi absolut maksimum" value={result.weighing.maxAbsoluteCorrection === null ? 'Belum lengkap' : `${fmt(result.weighing.maxAbsoluteCorrection, 5)} kg`} />
       <ValueLine label="U95 maksimum" value={result.weighing.maxUncertaintyU95 === null ? 'Belum lengkap' : `${fmt(result.weighing.maxUncertaintyU95, 5)} kg`} />
-      <ValueLine label="LOP / batas 10 × resolusi" value={result.weighing.lop === null ? 'Belum lengkap' : `${fmt(result.weighing.lop, 5)} / ${fmt(result.weighing.limit, 2)} kg`} />
+      <ValueLine label="LOP / batas metode" value={result.weighing.lop === null || result.weighing.limit === null ? 'Belum lengkap' : `${fmt(result.weighing.lop, 5)} / ${fmt(result.weighing.limit, 2)} kg`} />
       <View style={styles.resultLine}><Text style={styles.resultLabel}>Hasil LOP</Text><Badge text={result.weighing.pass === null ? 'MENUNGGU' : result.weighing.pass ? 'LULUS' : 'TIDAK LULUS'} tone={result.weighing.pass === null ? 'wait' : result.weighing.pass ? 'good' : 'bad'} /></View>
       {result.weighing.points.map((point) => <View key={point.id} style={styles.resultPerformance}>
         <View style={styles.resultLine}><Text style={styles.resultLabel}>Beban {point.loadKg} kg</Text><Text style={styles.resultTiny}>{point.standardWeightSerials.join(' + ')}</Text></View>
@@ -725,7 +733,7 @@ function ResultStep({ data, result, instrument }: { data: CalibrationData; resul
           <ValueLine label="Enam bacaan / rata-rata" value={row.result ? `${row.result.readings.map((value) => fmt(value)).join(' · ')} / ${fmt(row.result.mean)} ${row.unit}` : 'Belum lengkap'} />
           <ValueLine label="Koreksi analyzer" value={row.result ? `${fmt(row.result.correction)} ${row.unit}` : '—'} />
           <ValueLine label="Rata-rata terkoreksi" value={row.result ? `${fmt(row.result.correctedMean)} ${row.unit}` : '—'} />
-          <ValueLine label="Galat / batas 10%" value={row.result ? `${fmt(row.result.error)} ${row.unit} / ${fmt(row.result.testValue * 100, 2)}%` : '—'} />
+          <ValueLine label="Galat / toleransi aktif" value={row.result ? `${fmt(row.result.error)} ${row.unit} / ${fmt(row.result.testValue * 100, 2)}% ≤ ${fmt(row.result.tolerance * 100, 2)}%` : '—'} />
           <ValueLine label="U95" value={row.result ? `${fmt(row.result.u95)} ${row.unit}` : '—'} />
         </View>)}
       </Card>
@@ -754,6 +762,7 @@ export default function CalibrationScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { records, updateRecord, storageError } = useRecords();
+  const { userName } = useRole();
   const { customers, devices, equipmentMethods, customEquipment, loaded: directoryLoaded } = useAdminData();
   const record = useMemo<CalibrationRecord | undefined>(() => records.find((item) => item.id === String(id)), [records, id]);
   const [step, setStep] = useState(0);
@@ -799,7 +808,12 @@ export default function CalibrationScreen() {
         ...(weighing ? { weighing } : {}),
       }
     });
-  }, [customers, data, devices, directoryLoaded, equipmentMethods, instrument, record, updateRecord]);
+  }, [customers, customEquipment, data, devices, directoryLoaded, equipmentMethods, instrument, record, updateRecord]);
+
+  useEffect(() => {
+    if (!record || !data || !userName.trim() || data.identity.technician.trim()) return;
+    updateRecord(record.id, { data: { ...data, identity: { ...data.identity, technician: userName.trim() } } });
+  }, [data, record, updateRecord, userName]);
 
   if (!record || !instrument || !data || !result) return <SafeAreaView style={styles.safe}><Navbar title="Pengerjaan" onBack={() => router.replace('/')} backLabel="Kembali ke menu" /><View style={styles.missingScreen}><Text style={styles.outcomeTitle}>Catatan tidak ditemukan</Text><ActionButton title="Kembali ke catatan" onPress={() => router.replace('/')} /></View></SafeAreaView>;
 
@@ -807,7 +821,11 @@ export default function CalibrationScreen() {
     data: { ...data, [section]: { ...data[section], [key]: value } } as CalibrationData,
   });
   const updateEquipmentPhoto = (side: keyof EquipmentPhotos, uri: string) => updateRecord(record.id, {
-    data: { ...data, equipmentPhotos: { front: '', back: '', left: '', right: '', ...data.equipmentPhotos, [side]: uri } },
+    data: {
+      ...data,
+      equipmentPhotos: { front: '', back: '', left: '', right: '', ...data.equipmentPhotos, [side]: uri },
+      equipmentPhotoPaths: { front: '', back: '', left: '', right: '', ...data.equipmentPhotoPaths, [side]: '' },
+    },
   });
   const toggleDevice = (device: SelectedMeasurementDevice, profile: Thermohygrometer | null) => {
     const current = data.selectedDevices ?? [];

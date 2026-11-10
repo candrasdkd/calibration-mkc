@@ -7,10 +7,11 @@ import { SearchPickerModal } from '../../../components/picker/SearchPickerModal'
 import { ActionButton, Badge, Card, ConfirmModal, Field, Heading } from '../../../components/ui';
 import { useAdminData } from '../hooks/useAdminData';
 import { newAdminId, type EquipmentMethod } from '../../../core/admin-data';
-import { getCustomEquipmentInstrument, getInstrument, instruments } from '../../../core/instruments';
+import { getConfiguredInstruments, getCustomEquipmentInstrument, getInstrument } from '../../../core/instruments';
 import type { CustomEquipment } from '../../../core/types';
 import { ScreenPage } from '../../../components/ScreenPage';
 import { StorageMessage } from '../components/StorageMessage';
+import { styles as adminStyles } from '../styles/AdminStyles';
 import { styles } from '../styles/HealthEquipmentScreenStyles';
 import type { Confirmation } from '../types/Confirmation';
 
@@ -27,26 +28,27 @@ export function HealthEquipmentScreen() {
   const [standardPickerOpen, setStandardPickerOpen] = useState(false);
   const [standardSearch, setStandardSearch] = useState('');
   const locked = !data.loaded || Boolean(data.storageError);
-  const available = instruments.filter((instrument) => !data.equipmentMethods.some((entry) => entry.instrumentId === instrument.id));
+  const catalogInstruments = getConfiguredInstruments(data.methodRevisions);
+  const available = catalogInstruments.filter((instrument) => !data.equipmentMethods.some((entry) => entry.instrumentId === instrument.id));
   const configured = [
-    ...instruments.flatMap((instrument) => {
+    ...catalogInstruments.flatMap((instrument) => {
     const entry = data.equipmentMethods.find((item) => item.instrumentId === instrument.id);
     return entry ? [{ instrument, entry, id: instrument.id, custom: false }] : [];
     }),
     ...data.customEquipment.flatMap((entry) => {
-    const instrument = getCustomEquipmentInstrument(entry);
+    const instrument = getCustomEquipmentInstrument(entry, data.methodRevisions);
     return instrument ? [{ instrument, entry, id: entry.id, custom: true }] : [];
     }),
   ];
   const normalizedSearch = instrumentSearch.trim().toLowerCase();
   const filteredAvailable = available.filter((instrument) => !normalizedSearch
     || `${instrument.name} ${instrument.subtitle}`.toLowerCase().includes(normalizedSearch));
-  const selectedTemplate = customEditing ? getInstrument(customEditing.templateId) : undefined;
+  const selectedTemplate = customEditing ? getInstrument(customEditing.templateId, data.methodRevisions) : undefined;
   const requiredStandardNames = new Set(selectedTemplate?.standards.map(([name]) => name.trim().toLowerCase()) ?? []);
   const extraStandardNames = [...new Map([...data.devices.filter((device) => !device.weighingStandard).map((device) => device.name.trim()), ...(customEditing?.standardNames ?? [])]
     .filter(Boolean).map((name) => [name.toLowerCase(), name] as const)).values()]
     .filter((name) => !requiredStandardNames.has(name.toLowerCase()));
-  const filteredTemplates = instruments.filter((instrument) => !templateSearch.trim()
+  const filteredTemplates = catalogInstruments.filter((instrument) => !templateSearch.trim()
     || `${instrument.name} ${instrument.subtitle}`.toLowerCase().includes(templateSearch.trim().toLowerCase()));
   const filteredExtraStandards = extraStandardNames.filter((name) => !standardSearch.trim()
     || name.toLowerCase().includes(standardSearch.trim().toLowerCase()));
@@ -62,31 +64,31 @@ export function HealthEquipmentScreen() {
     if (!editing?.instrumentId) { Alert.alert('Alat kesehatan wajib dipilih', 'Pilih jenis alat yang akan disiapkan untuk teknisi.'); return; }
     if (!editing.method.trim()) { Alert.alert('Metode kerja wajib diisi', 'Masukkan metode kerja sebelum menyimpan katalog.'); return; }
     if (isNew && data.equipmentMethods.some((entry) => entry.instrumentId === editing.instrumentId)) { Alert.alert('Alat sudah terdaftar', 'Ubah metode kerja dari katalog yang sudah ada.'); return; }
-    const instrument = getInstrument(editing.instrumentId);
+    const instrument = getInstrument(editing.instrumentId, data.methodRevisions);
     if (!instrument) { Alert.alert('Jenis alat tidak dikenal', 'Pilih salah satu jenis alat yang didukung.'); return; }
     const entry = { instrumentId: editing.instrumentId, method: editing.method.trim() };
     setConfirmation({ title: isNew ? 'Tambahkan alkes ke katalog?' : 'Simpan metode kerja?', message: `Metode ${instrument.name} akan digunakan untuk kalibrasi baru oleh teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveEquipmentMethod(entry); closeEditor(); } });
   };
   const remove = (entry: EquipmentMethod) => {
-    const instrument = getInstrument(entry.instrumentId);
+    const instrument = getInstrument(entry.instrumentId, data.methodRevisions);
     setConfirmation({ title: 'Hapus dari katalog?', message: `${instrument?.name ?? 'Alat kesehatan'} tidak tersedia untuk pekerjaan baru. Catatan yang sudah dibuat tetap tersimpan.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => data.deleteEquipmentMethod(entry.instrumentId) });
   };
   const addCustom = () => setCustomEditing({ id: '', templateId: '', name: '', method: '', standardNames: [] });
   const selectTemplate = (templateId: string) => {
     setTemplatePickerOpen(false);
-    const required = new Set(getInstrument(templateId)?.standards.map(([name]) => name.trim().toLowerCase()) ?? []);
+    const required = new Set(getInstrument(templateId, data.methodRevisions)?.standards.map(([name]) => name.trim().toLowerCase()) ?? []);
     setCustomEditing((current) => current ? { ...current, templateId, standardNames: current.standardNames.filter((name) => !required.has(name.trim().toLowerCase())) } : current);
   };
   const saveCustom = () => {
-    if (!customEditing?.templateId || !getInstrument(customEditing.templateId)) { Alert.alert('Template rumus wajib dipilih', 'Pilih alat yang rumusnya paling sesuai.'); return; }
+    if (!customEditing?.templateId || !getInstrument(customEditing.templateId, data.methodRevisions)) { Alert.alert('Template rumus wajib dipilih', 'Pilih alat yang rumusnya paling sesuai.'); return; }
     if (!customEditing.name.trim()) { Alert.alert('Nama alkes wajib diisi', 'Masukkan nama yang akan ditampilkan ke teknisi.'); return; }
     if (!customEditing.method.trim()) { Alert.alert('Metode kerja wajib diisi', 'Masukkan metode yang akan digunakan pada pekerjaan baru.'); return; }
     const nameKey = customEditing.name.trim().toLowerCase();
-    const duplicate = instruments.some((instrument) => instrument.name.trim().toLowerCase() === nameKey)
+    const duplicate = catalogInstruments.some((instrument) => instrument.name.trim().toLowerCase() === nameKey)
       || data.customEquipment.some((item) => item.id !== customEditing.id && item.name.trim().toLowerCase() === nameKey);
     if (duplicate) { Alert.alert('Nama alkes sudah digunakan', 'Gunakan nama yang berbeda agar teknisi mudah membedakan alat.'); return; }
     const entry = { ...customEditing, id: customEditing.id || newAdminId('custom-alkes'), name: customEditing.name.trim(), method: customEditing.method.trim(), standardNames: [...new Set(customEditing.standardNames.map((name) => name.trim()).filter(Boolean))] };
-    setConfirmation({ title: customEditing.id ? 'Simpan perubahan alkes?' : 'Tambahkan alkes ke katalog?', message: `${entry.name} memakai rumus ${getInstrument(entry.templateId)?.name}. Standar yang dipilih akan tersedia di form teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveCustomEquipment(entry); setCustomEditing(null); } });
+    setConfirmation({ title: customEditing.id ? 'Simpan perubahan alkes?' : 'Tambahkan alkes ke katalog?', message: `${entry.name} memakai rumus ${getInstrument(entry.templateId, data.methodRevisions)?.name}. Standar yang dipilih akan tersedia di form teknisi.`, confirmLabel: 'Simpan', onConfirm: () => { data.saveCustomEquipment(entry); setCustomEditing(null); } });
   };
   const removeCustom = (entry: CustomEquipment) => setConfirmation({ title: 'Hapus alkes dari katalog?', message: `${entry.name} tidak tersedia untuk pekerjaan baru. Catatan yang sudah dibuat tetap tersimpan.`, confirmLabel: 'Hapus', danger: true, onConfirm: () => data.deleteCustomEquipment(entry.id) });
 
@@ -128,7 +130,7 @@ export function HealthEquipmentScreen() {
         <Text style={styles.blockLabel}>METODE KERJA</Text>
         <Text style={styles.methodText} numberOfLines={4}>{entry.method}</Text>
       </View>
-      {custom ? <Text style={styles.standardHint}>Rumus mengikuti {getInstrument((entry as CustomEquipment).templateId)?.name}. Nilai acuan inti memakai rumus tersebut.</Text> : null}
+      {custom ? <Text style={styles.standardHint}>Rumus mengikuti {getInstrument((entry as CustomEquipment).templateId, data.methodRevisions)?.name}. Nilai acuan inti memakai rumus tersebut.</Text> : null}
       <View style={styles.standardBlock}>
         <View style={styles.standardHeading}><Text style={styles.standardTitle}>Standar yang digunakan</Text><Text style={styles.standardHint}>dipilih teknisi</Text></View>
         <View style={styles.standardChips}>
@@ -146,7 +148,7 @@ export function HealthEquipmentScreen() {
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.deviceModalHeader}><Text style={styles.deviceModalTitle}>{customEditing?.id ? 'Ubah alkes' : 'Buat alkes dari rumus'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Tutup form alkes" onPress={() => setCustomEditing(null)}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable></View>
-          {customEditing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled"><Card>
+          {customEditing ? <ScrollView style={adminStyles.deviceModalScroll} contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled"><Card>
             <Heading title="Identitas dan rumus" hint="Pilih alat dengan cara ukur dan satuan yang sama. Titik uji, batas, perhitungan, dan laporan akan mengikuti template." />
             <PickerField label="Template rumus *" value={selectedTemplate?.name} placeholder="Pilih rumus acuan" onPress={() => { setTemplateSearch(''); setTemplatePickerOpen(true); }} />
             <Field label="Nama alkes *" value={customEditing.name} onChange={(name) => setCustomEditing((current) => current ? { ...current, name } : current)} placeholder="Contoh: Timbangan bayi digital" />
@@ -157,8 +159,13 @@ export function HealthEquipmentScreen() {
               {customEditing.standardNames.length ? <View style={styles.standardChips}>{customEditing.standardNames.map((name) => <View key={name} style={styles.standardChip}><Text style={styles.standardChipText}>{name}</Text></View>)}</View> : null}
               <Text style={styles.modalHint}>Standar wajib berasal dari rumus. Tambahan yang dipilih juga akan diminta dari teknisi. Daftarkan dulu alat ukurnya di menu Standar kalibrasi; teknisi memilih nomor seri saat mulai bekerja.</Text>
             </> : <Text style={styles.modalHint}>Pilih template untuk melihat standar wajibnya.</Text>}
-            <View style={styles.actions}><ActionButton title={customEditing.id ? 'Simpan perubahan alkes' : 'Simpan alkes'} onPress={saveCustom} disabled={locked} /><ActionButton title="Batal" secondary onPress={() => setCustomEditing(null)} /></View>
           </Card></ScrollView> : null}
+          {customEditing ? <View style={adminStyles.deviceModalFooter}>
+            <View style={[adminStyles.actions, adminStyles.deviceModalFooterActions]}>
+              <View style={adminStyles.deviceModalFooterAction}><ActionButton title={customEditing.id ? 'Simpan perubahan alkes' : 'Simpan alkes'} onPress={saveCustom} disabled={locked} /></View>
+              <View style={adminStyles.deviceModalFooterAction}><ActionButton title="Batal" secondary onPress={() => setCustomEditing(null)} /></View>
+            </View>
+          </View> : null}
         </KeyboardAvoidingView>
       </SafeAreaView></SafeAreaProvider>
     </Modal>
@@ -166,14 +173,19 @@ export function HealthEquipmentScreen() {
       <SafeAreaProvider><SafeAreaView edges={['top', 'left', 'right', 'bottom']} style={styles.deviceModal}>
         <KeyboardAvoidingView style={styles.deviceModalFlex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.deviceModalHeader}><Text style={styles.deviceModalTitle}>{isNew ? 'Tambah alat kesehatan' : 'Ubah metode kerja'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Tutup form Katalog Alkes" onPress={closeEditor}><Text style={styles.deviceModalClose}>Tutup</Text></Pressable></View>
-          {editing ? <ScrollView contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled"><Card>
+          {editing ? <ScrollView style={adminStyles.deviceModalScroll} contentContainerStyle={styles.deviceModalContent} keyboardShouldPersistTaps="handled"><Card>
             <Heading title="Informasi alat kesehatan" hint="Pilih alat, lalu tentukan metode kerja yang akan diterapkan pada pekerjaan baru." />
-            {isNew ? <PickerField label="Alat kesehatan *" value={getInstrument(editing.instrumentId)?.name} placeholder="Pilih alat kesehatan" onPress={openInstrumentPicker} /> : <View style={styles.selectedInstrument}><Text style={styles.blockLabel}>ALAT KESEHATAN</Text><Text style={styles.selectedInstrumentName}>{getInstrument(editing.instrumentId)?.name}</Text></View>}
-            {isNew && editing.instrumentId ? <View style={styles.methodBlock}><Text style={styles.blockLabel}>STANDAR UNTUK PEKERJAAN INI</Text><View style={styles.standardChips}>{getInstrument(editing.instrumentId)?.standards.map(([name]) => <View key={name} style={styles.standardChip}><Text style={styles.standardChipText}>{name}</Text></View>)}{getInstrument(editing.instrumentId)?.weighingScale ? <View style={styles.standardChip}><Text style={styles.standardChipText}>Anak timbangan per titik beban</Text></View> : null}{!getInstrument(editing.instrumentId)?.standards.length && !getInstrument(editing.instrumentId)?.weighingScale ? <Text style={styles.noStandard}>Tidak ada standar khusus.</Text> : null}</View><Text style={styles.standardHint}>Nomor seri dipilih teknisi saat mengerjakan.</Text></View> : null}
+            {isNew ? <PickerField label="Alat kesehatan *" value={getInstrument(editing.instrumentId, data.methodRevisions)?.name} placeholder="Pilih alat kesehatan" onPress={openInstrumentPicker} /> : <View style={styles.selectedInstrument}><Text style={styles.blockLabel}>ALAT KESEHATAN</Text><Text style={styles.selectedInstrumentName}>{getInstrument(editing.instrumentId, data.methodRevisions)?.name}</Text></View>}
+            {isNew && editing.instrumentId ? <View style={styles.methodBlock}><Text style={styles.blockLabel}>STANDAR UNTUK PEKERJAAN INI</Text><View style={styles.standardChips}>{getInstrument(editing.instrumentId, data.methodRevisions)?.standards.map(([name]) => <View key={name} style={styles.standardChip}><Text style={styles.standardChipText}>{name}</Text></View>)}{getInstrument(editing.instrumentId, data.methodRevisions)?.weighingScale ? <View style={styles.standardChip}><Text style={styles.standardChipText}>Anak timbangan per titik beban</Text></View> : null}{!getInstrument(editing.instrumentId, data.methodRevisions)?.standards.length && !getInstrument(editing.instrumentId, data.methodRevisions)?.weighingScale ? <Text style={styles.noStandard}>Tidak ada standar khusus.</Text> : null}</View><Text style={styles.standardHint}>Nomor seri dipilih teknisi saat mengerjakan.</Text></View> : null}
             <Field label="Metode kerja *" value={editing.method} onChange={(method) => setEditing((current) => current ? { ...current, method } : current)} multiline />
             <Text style={styles.modalHint}>Metode ini otomatis disalin ke pekerjaan baru. Rumus dan standar mengikuti alat yang dipilih.</Text>
-            <View style={styles.actions}><ActionButton title="Simpan metode kerja" onPress={save} disabled={locked} /><ActionButton title="Batal" secondary onPress={closeEditor} /></View>
           </Card></ScrollView> : null}
+          {editing ? <View style={adminStyles.deviceModalFooter}>
+            <View style={[adminStyles.actions, adminStyles.deviceModalFooterActions]}>
+              <View style={adminStyles.deviceModalFooterAction}><ActionButton title="Simpan metode kerja" onPress={save} disabled={locked} /></View>
+              <View style={adminStyles.deviceModalFooterAction}><ActionButton title="Batal" secondary onPress={closeEditor} /></View>
+            </View>
+          </View> : null}
         </KeyboardAvoidingView>
       </SafeAreaView></SafeAreaProvider>
     </Modal>

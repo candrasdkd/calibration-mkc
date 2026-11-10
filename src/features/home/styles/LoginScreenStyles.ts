@@ -1,0 +1,31 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../../../core/theme';
+
+export const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.canvas },
+  flex: { flex: 1 },
+  content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 22, paddingTop: 26, paddingBottom: 28 },
+  brand: { alignItems: 'center', marginBottom: 23 },
+  brandMark: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: colors.primary, marginBottom: 16 },
+  brandMarkText: { color: 'white', fontSize: 27, fontWeight: '900' },
+  eyebrow: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
+  title: { color: colors.ink, fontSize: 26, lineHeight: 32, fontWeight: '900', textAlign: 'center', marginTop: 8 },
+  subtitle: { color: colors.muted, fontSize: 13, textAlign: 'center', marginTop: 6 },
+  loginCard: { padding: 18 },
+  roleLabel: { color: colors.ink, fontSize: 11, fontWeight: '900', letterSpacing: 0.7, marginBottom: 9 },
+  roleOptions: { gap: 8, marginBottom: 16 },
+  roleOption: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: '#FBFDFD' },
+  roleOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  roleMark: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#EEF3F5' },
+  roleMarkSelected: { backgroundColor: colors.surface },
+  roleMarkText: { color: colors.muted, fontSize: 10, fontWeight: '900' },
+  roleMarkTextSelected: { color: colors.primary },
+  roleCopy: { flex: 1 },
+  roleName: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  roleNameSelected: { color: colors.primary, fontWeight: '900' },
+  roleDescription: { color: colors.muted, fontSize: 10, marginTop: 3 },
+  selectedMark: { color: colors.primary, fontSize: 17, fontWeight: '900', paddingHorizontal: 5 },
+  error: { color: colors.danger, fontSize: 12, marginBottom: 12 },
+  disclaimer: { color: colors.muted, fontSize: 10, lineHeight: 16, textAlign: 'center', marginTop: 13 },
+  footer: { color: colors.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1.1, textAlign: 'center', marginTop: 22 },
+});

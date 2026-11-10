@@ -1,4 +1,6 @@
 import { getInstrumentTemplateId, thermohygrometers } from './instruments';
+import { evaluateFormulaExpression } from './formulaExpressions';
+import { defaultElectricalSafetyConfig, defaultEnvironmentExpressions } from './methodFormulas';
 import type {
   CalculationResult,
   CalculatedPerformance,
@@ -36,6 +38,24 @@ const positiveIdentityNumber = (value: string) => {
 
 const average = (values: number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
 
+function numericFormula(expressions: Record<string, string> | undefined, key: string, fallback: string, variables: Record<string, number>): number | null {
+  try {
+    const value = evaluateFormulaExpression(expressions?.[key] ?? fallback, variables);
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function booleanFormula(expressions: Record<string, string> | undefined, key: string, fallback: string, variables: Record<string, number>): boolean | null {
+  try {
+    const value = evaluateFormulaExpression(expressions?.[key] ?? fallback, variables);
+    return typeof value === 'boolean' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function validDate(value: string) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return false;
@@ -62,6 +82,7 @@ function studentTCritical95(degreesOfFreedom: number): number {
 function calculateWeighing(instrument: Instrument, data?: WeighingData): WeighingResult | null {
   const config = instrument.weighingScale;
   if (!config) return null;
+  const expressions = instrument.formulaExpressions;
   const repeatabilityReadings = Array.isArray(data?.repeatabilityReadings) ? data.repeatabilityReadings.map((reading) => {
     const zeroReading = number(reading.zeroReading);
     const indication = number(reading.indication);
@@ -87,19 +108,28 @@ function calculateWeighing(instrument: Instrument, data?: WeighingData): Weighin
     const nominalLoadKg = validWeights.reduce((sum, weight) => sum + weight.nominalKg, 0);
     const weightsComplete = weightDataComplete && new Set(validWeights.map((weight) => weight.serial)).size === validWeights.length
       && Math.abs(nominalLoadKg - setting.loadKg) < 1e-6;
-    const referenceMassKg = weightDataComplete ? validWeights.reduce((sum, weight) => sum + weight.conventionalMass2026G / 1000, 0) : null;
+    const sumMass2026G = validWeights.reduce((sum, weight) => sum + weight.conventionalMass2026G, 0);
     const certificateU95G = validWeights.reduce((sum, weight) => sum + weight.uncertaintyU95G, 0);
-    const driftG = validWeights.reduce((sum, weight) => sum + (0.5 * (weight.conventionalMass2026G - weight.conventionalMass2025G)) / Math.sqrt(3), 0);
-    const uResolution = (0.5 * config.resolutionKg) / Math.sqrt(config.resolutionDivisor);
-    const uRepeatability = (0.5 * config.resolutionKg) / 2;
-    const uCertificate = (certificateU95G / 2) / 1000;
-    const uDrift = (driftG / Math.sqrt(3)) / 1000;
+    const sumDriftDeltaG = validWeights.reduce((sum, weight) => sum + weight.conventionalMass2026G - weight.conventionalMass2025G, 0);
+    const referenceMassKg = weightDataComplete ? numericFormula(expressions, 'weighing.referenceMass', 'sumMass2026G / 1000', { sumMass2026G }) : null;
+    const uResolution = numericFormula(expressions, 'weighing.uResolution', '(0.5 * d) / sqrt(resolutionDivisor)', { d: config.resolutionKg, resolutionDivisor: config.resolutionDivisor });
+    const uRepeatability = numericFormula(expressions, 'weighing.uRepeatability', '(0.5 * d) / 2', { d: config.resolutionKg });
+    const uCertificate = numericFormula(expressions, 'weighing.uCertificate', '(sumCertificateU95G / 2) / 1000', { sumCertificateU95G: certificateU95G });
+    const uDrift = numericFormula(expressions, 'weighing.uDrift', '(0.5 * sumDriftDeltaG / sqrt(3) / sqrt(3)) / 1000', { sumDriftDeltaG });
+    const uncertaintyVariables = { uResolution: uResolution ?? 0, uRepeatability: uRepeatability ?? 0, uCertificate: uCertificate ?? 0, uDrift: uDrift ?? 0 };
     const components = [uResolution, uRepeatability, uCertificate, uDrift];
-    const variance = components.reduce((sum, component) => sum + component ** 2, 0);
-    const dofDenominator = components.reduce((sum, component) => sum + component ** 4 / 50, 0);
+    const variance = components.reduce<number>((sum, component) => sum + (component ?? 0) ** 2, 0);
+  const dofDenominator = components.reduce<number>((sum, component, index) => sum + (component ?? 0) ** 4 / config.degreesOfFreedom[index], 0);
     const effectiveDof = dofDenominator > 0 ? variance ** 2 / dofDenominator : Number.POSITIVE_INFINITY;
-    const uncertaintyU95Kg = weightDataComplete ? Math.sqrt(variance) * studentTCritical95(effectiveDof) : null;
-    const complete = weightsComplete && zeroReading !== null && indication !== null;
+    const k95 = studentTCritical95(effectiveDof);
+    const uncertaintyU95Kg = weightDataComplete && components.every((value) => value !== null && value >= 0)
+      ? numericFormula(expressions, 'weighing.u95', 'sqrt(uResolution^2 + uRepeatability^2 + uCertificate^2 + uDrift^2) * k95', { ...uncertaintyVariables, k95 })
+      : null;
+    const correction = indication === null || referenceMassKg === null ? null
+      : numericFormula(expressions, 'weighing.correction', 'indication - referenceMass', { indication, referenceMass: referenceMassKg });
+    const reportCorrection = indication === null || referenceMassKg === null ? null
+      : numericFormula(expressions, 'weighing.reportCorrection', 'referenceMass - indication', { indication, referenceMass: referenceMassKg });
+    const complete = weightsComplete && zeroReading !== null && indication !== null && correction !== null && reportCorrection !== null && uncertaintyU95Kg !== null && uncertaintyU95Kg >= 0;
     return {
       id: setting.id,
       loadKg: setting.loadKg,
@@ -108,7 +138,8 @@ function calculateWeighing(instrument: Instrument, data?: WeighingData): Weighin
       standardWeightSerials: validWeights.map((weight) => weight.serial),
       standardWeightsComplete: weightsComplete,
       referenceMassKg,
-      correction: indication === null || referenceMassKg === null ? null : indication - referenceMassKg,
+      correction,
+      reportCorrection,
       uncertaintyU95Kg,
       complete,
     };
@@ -116,45 +147,53 @@ function calculateWeighing(instrument: Instrument, data?: WeighingData): Weighin
   const complete = repeatabilityComplete && points.length === config.points.length && points.every((point) => point.complete);
   const maxAbsoluteCorrection = complete ? Math.max(...points.map((point) => Math.abs(point.correction ?? 0))) : null;
   const maxUncertaintyU95 = complete ? Math.max(...points.map((point) => point.uncertaintyU95Kg ?? 0)) : null;
-  const lop = maxAbsoluteCorrection === null || maxUncertaintyU95 === null ? null : maxAbsoluteCorrection + maxUncertaintyU95;
+  const rawLop = maxAbsoluteCorrection === null || maxUncertaintyU95 === null ? null
+    : numericFormula(expressions, 'weighing.lop', 'maxCorrection + maxU95', { maxCorrection: maxAbsoluteCorrection, maxU95: maxUncertaintyU95 });
+  const lop = rawLop !== null && rawLop >= 0 ? rawLop : null;
+  const rawLimit = numericFormula(expressions, 'weighing.limit', '10 * d', { d: config.resolutionKg });
+  const limit = rawLimit !== null && rawLimit >= 0 ? rawLimit : null;
+  const passed = lop === null || limit === null ? null : booleanFormula(expressions, 'weighing.pass', 'lop <= limit', { lop, limit });
+  const reportStandardDeviation = numericFormula(expressions, 'weighing.reportSD', 'sqrt(2 / 3) * (0.5 * d)', { d: config.resolutionKg });
   return {
     repeatabilityMean: repeatabilityComplete ? average(validRepeatedReadings) : null,
     repeatabilityStandardDeviation: repeatabilityComplete ? sampleStandardDeviation(validRepeatedReadings) : null,
-    reportStandardDeviation: Math.sqrt(2 / 3) * (0.5 * config.resolutionKg),
+    reportStandardDeviation,
     repeatabilityReadings,
     points,
     maxAbsoluteCorrection,
     maxUncertaintyU95,
     lop,
-    limit: 10 * config.resolutionKg,
-    pass: lop === null ? null : lop <= 10 * config.resolutionKg,
-    complete,
+    limit,
+    pass: passed,
+    complete: complete && passed !== null && lop !== null && reportStandardDeviation !== null,
   };
 }
 
-function interpolatePressureCorrection(value: number, config: SphygmomanometerConfig, direction: 'up' | 'down'): number | null {
+function interpolatePressureCorrection(value: number, config: SphygmomanometerConfig, direction: 'up' | 'down', expressions?: Record<string, string>): number | null {
   const table = config.dpmCorrections;
   if (value < table[0].pressure || value > table[table.length - 1].pressure) return null;
   for (let index = 1; index < table.length; index += 1) {
     const upper = table[index];
     const lower = table[index - 1];
     if (value <= upper.pressure) {
-      const portion = (value - lower.pressure) / (upper.pressure - lower.pressure);
-      return lower[direction] + portion * (upper[direction] - lower[direction]);
+      return numericFormula(expressions, 'sphyg.interpolation', 'c1 + (x - x1) * (c2 - c1) / (x2 - x1)', {
+        x: value, x1: lower.pressure, x2: upper.pressure, c1: lower[direction], c2: upper[direction],
+      });
     }
   }
   return table[table.length - 1][direction];
 }
 
-function calculateSphygmomanometer(config: SphygmomanometerConfig, data: SphygmomanometerData | undefined, standardValid: boolean): SphygmomanometerResult {
+function calculateSphygmomanometer(config: SphygmomanometerConfig, data: SphygmomanometerData | undefined, standardValid: boolean, expressions?: Record<string, string>): SphygmomanometerResult {
   const leakageDrop = number(data?.leakageDrop);
   const rapidDeflationSeconds = number(data?.rapidDeflationSeconds);
   const pressureReadings = config.pressurePoints.map((setting) => {
     const input = data?.pressureReadings.find((item) => item.setting === setting);
     const calculateDirection = (direction: 'up' | 'down'): SphygmomanometerDirectionResult => {
       const readings = (input?.[direction] ?? []).map(number);
-      const corrections = readings.map((reading) => reading === null ? null : interpolatePressureCorrection(reading, config, direction));
-      const correctedReadings = readings.map((reading, index) => reading === null || corrections[index] === null ? null : reading + corrections[index]!);
+      const corrections = readings.map((reading) => reading === null ? null : interpolatePressureCorrection(reading, config, direction, expressions));
+      const correctedReadings = readings.map((reading, index) => reading === null || corrections[index] === null ? null
+        : numericFormula(expressions, 'sphyg.correctedReading', 'reading + correction', { reading, correction: corrections[index]! }));
       const complete = readings.length === 3 && readings.every((reading) => reading !== null)
         && correctedReadings.every((reading) => reading !== null);
       const drift = config.drift.find((item) => item.pressure === setting)?.[direction];
@@ -169,44 +208,64 @@ function calculateSphygmomanometer(config: SphygmomanometerConfig, data: Sphygmo
       const validReadings = correctedReadings as number[];
       const mean = average(validReadings);
       const standardDeviation = sampleStandardDeviation(validReadings);
-      const components = [
-        (0.5 * config.accuracyClass) / Math.sqrt(6),
-        standardDeviation / Math.sqrt(3),
-        drift / Math.sqrt(3),
-        config.dpmU95 / 2,
-      ];
-      const variance = components.reduce((sum, component) => sum + component ** 2, 0);
-      const dofDenominator = components.reduce((sum, component, index) => sum + component ** 4 / [50, 5, 50, 50][index], 0);
+      const uResolution = numericFormula(expressions, 'sphyg.uResolution', '(0.5 * accuracyClass) / sqrt(6)', { accuracyClass: config.accuracyClass });
+      const uRepeatability = numericFormula(expressions, 'sphyg.uRepeatability', 'standardDeviation / sqrt(3)', { standardDeviation });
+      const uDrift = numericFormula(expressions, 'sphyg.uDrift', 'drift / sqrt(3)', { drift });
+      const uDpm = numericFormula(expressions, 'sphyg.uDpm', 'dpmU95 / 2', { dpmU95: config.dpmU95 });
+      const components = [uResolution, uRepeatability, uDrift, uDpm];
+      if (components.some((component) => component === null || component < 0)) return {
+        readings, correctedReadings, mean: null, standardDeviation: null, correction: null,
+        uncertaintyU95: null, decisionValue: null, complete: false, pass: null,
+      };
+      const variance = components.reduce<number>((sum, component) => sum + (component ?? 0) ** 2, 0);
+      const dofDenominator = components.reduce<number>((sum, component, index) => sum + (component ?? 0) ** 4 / config.degreesOfFreedom[index], 0);
       const effectiveDof = variance ** 2 / dofDenominator;
-      const uncertaintyU95 = Math.max(studentTCritical95(effectiveDof) * Math.sqrt(variance), 0.99);
-      const correction = setting - mean;
-      const decisionValue = Math.abs(correction) + uncertaintyU95;
+      const k95 = studentTCritical95(effectiveDof);
+      const sumU2 = variance;
+      const uncertaintyU95 = numericFormula(expressions, 'sphyg.u95', 'max(k95 * sqrt(sumU2), minimumU95)', { k95, sumU2, minimumU95: config.minimumPressureU95MmHg });
+      const correction = numericFormula(expressions, 'sphyg.correction', 'setting - mean', { setting, mean });
+      const decisionValue = correction === null || uncertaintyU95 === null ? null
+        : numericFormula(expressions, 'sphyg.decision', 'abs(correction) + u95', { correction, u95: uncertaintyU95 });
+      const pass = decisionValue === null ? null : booleanFormula(expressions, 'sphyg.pressurePass', 'decisionValue <= pressureTolerance', {
+        decisionValue, pressureTolerance: config.pressureToleranceMmHg,
+      });
+      if (decisionValue === null || pass === null || uncertaintyU95 === null || uncertaintyU95 < 0) return {
+        readings, correctedReadings, mean: null, standardDeviation: null, correction: null,
+        uncertaintyU95: null, decisionValue: null, complete: false, pass: null,
+      };
       return {
         readings, correctedReadings, mean, standardDeviation, correction, uncertaintyU95,
-        decisionValue, complete: true, pass: decisionValue <= 4,
+        decisionValue, complete: true, pass,
       };
     };
     return { setting, up: calculateDirection('up'), down: calculateDirection('down') };
   });
-  const complete = leakageDrop !== null && rapidDeflationSeconds !== null
+  const leakagePass = leakageDrop === null ? null : booleanFormula(expressions, 'sphyg.leakagePass', 'leakageDrop <= leakageLimit', {
+    leakageDrop, leakageLimit: config.leakageLimitMmHg,
+  });
+  const deflationPass = rapidDeflationSeconds === null ? null : booleanFormula(expressions, 'sphyg.deflationPass', 'rapidDeflationSeconds <= deflationLimit', {
+    rapidDeflationSeconds, deflationLimit: config.deflationLimitSeconds,
+  });
+  const complete = leakageDrop !== null && rapidDeflationSeconds !== null && leakagePass !== null && deflationPass !== null
     && pressureReadings.length === config.pressurePoints.length
     && pressureReadings.every((point) => point.up.complete && point.down.complete) && standardValid;
   return {
-    leakageDrop: { value: leakageDrop, pass: leakageDrop === null ? null : leakageDrop <= 15 },
-    rapidDeflationSeconds: { value: rapidDeflationSeconds, pass: rapidDeflationSeconds === null ? null : rapidDeflationSeconds <= 10 },
+    leakageDrop: { value: leakageDrop, pass: leakagePass },
+    rapidDeflationSeconds: { value: rapidDeflationSeconds, pass: deflationPass },
     pressureReadings,
     complete,
   };
 }
 
-function interpolate(value: number, table: ThermohygrometerPoint[]): number | null {
+function interpolate(value: number, table: ThermohygrometerPoint[], expressions?: Record<string, string>): number | null {
   if (value < table[0].value || value > table[table.length - 1].value) return null;
   for (let index = 1; index < table.length; index += 1) {
     const upper = table[index];
     const lower = table[index - 1];
     if (value <= upper.value) {
-      const portion = (value - lower.value) / (upper.value - lower.value);
-      return lower.correction + portion * (upper.correction - lower.correction);
+      return numericFormula(expressions, 'interpolation', defaultEnvironmentExpressions.interpolation, {
+        x: value, x1: lower.value, x2: upper.value, c1: lower.correction, c2: upper.correction,
+      });
     }
   }
   return table[table.length - 1].correction;
@@ -216,6 +275,9 @@ function calculateEnvironment(data: CalibrationData): EnvironmentResult {
   const reference = data.environment.reference ?? thermohygrometers.find((item) => item.id === data.environment.standardId);
   if (!reference) return { reference: null, temperature: null, humidity: null, errors: ['Pilih thermohygrometer acuan.'] };
   const errors: string[] = [];
+  const formulaMethod = data.environment.formulaMethod;
+  const expressions = formulaMethod?.expressions;
+  const resolution = formulaMethod?.resolution ?? 0.1;
   const calculatePair = (
     kind: 'suhu' | 'kelembaban',
     startKey: 'temperatureStart' | 'humidityStart',
@@ -226,19 +288,34 @@ function calculateEnvironment(data: CalibrationData): EnvironmentResult {
     const start = number(data.environment[startKey]);
     const end = number(data.environment[endKey]);
     if (start === null || end === null) return null;
-    const startCorrection = interpolate(start, points);
-    const endCorrection = interpolate(end, points);
+    const startCorrection = interpolate(start, points, expressions);
+    const endCorrection = interpolate(end, points, expressions);
     if (startCorrection === null || endCorrection === null) {
       errors.push(kind === 'suhu'
         ? 'Suhu harus berada pada rentang sertifikat thermohygrometer 15–37 °C.'
         : 'Kelembaban harus berada pada rentang sertifikat thermohygrometer 30–80%.');
       return null;
     }
-    const correctedStart = start + startCorrection;
-    const correctedEnd = end + endCorrection;
-    const ua = sampleStandardDeviation([start, end]) / Math.sqrt(2);
-    const uResolution = (0.5 * 0.1) / Math.sqrt(3);
-    const combined = Math.sqrt(ua ** 2 + certificateU95 ** 2 + uResolution ** 2);
+    const correctedStart = numericFormula(expressions, 'correctedReading', defaultEnvironmentExpressions.correctedReading, { reading: start, correction: startCorrection });
+    const correctedEnd = numericFormula(expressions, 'correctedReading', defaultEnvironmentExpressions.correctedReading, { reading: end, correction: endCorrection });
+    if (correctedStart === null || correctedEnd === null) {
+      errors.push('Rumus kondisi lingkungan tidak valid. Periksa konfigurasi rumus admin.');
+      return null;
+    }
+    const standardDeviation = sampleStandardDeviation([start, end]);
+    const ua = numericFormula(expressions, 'ua', defaultEnvironmentExpressions.ua, { standardDeviation });
+    const uResolution = numericFormula(expressions, 'uResolution', defaultEnvironmentExpressions.uResolution, { resolution });
+    const mean = numericFormula(expressions, 'mean', defaultEnvironmentExpressions.mean, { correctedStart, correctedEnd });
+    const range = numericFormula(expressions, 'range', defaultEnvironmentExpressions.range, { correctedStart, correctedEnd });
+    if (ua === null || uResolution === null || mean === null || range === null) {
+      errors.push('Rumus kondisi lingkungan tidak valid. Periksa konfigurasi rumus admin.');
+      return null;
+    }
+    const u95 = numericFormula(expressions, 'u95', defaultEnvironmentExpressions.u95, { ua, certificateU95, uResolution });
+    if (u95 === null || u95 < 0) {
+      errors.push('Rumus kondisi lingkungan tidak valid. Periksa konfigurasi rumus admin.');
+      return null;
+    }
     return {
       start,
       end,
@@ -246,9 +323,9 @@ function calculateEnvironment(data: CalibrationData): EnvironmentResult {
       endCorrection,
       correctedStart,
       correctedEnd,
-      mean: (correctedStart + correctedEnd) / 2,
-      range: Math.abs(correctedStart - correctedEnd),
-      u95: combined * 2,
+      mean,
+      range,
+      u95,
     };
   };
 
@@ -257,7 +334,50 @@ function calculateEnvironment(data: CalibrationData): EnvironmentResult {
   return { reference, temperature, humidity, errors };
 }
 
+function calculateCustomExpressionRow(row: PerformanceEntry, defaults: MeasurementReferences): CalculatedPerformance | null {
+  const expressions = row.customExpressions;
+  const setting = number(row.setting);
+  const readings = row.readings.map(number);
+  const references = [row.references ?? defaults].flatMap((item) => [item.calibratorResolution, item.calibratorUncertainty, item.uutResolution]).map(number);
+  const tolerancePercent = number(row.tolerancePercent);
+  const absoluteTolerance = number(row.absoluteTolerance ?? '0');
+  if (!expressions || setting === null || row.count < 1 || row.readings.length !== row.count
+    || readings.some((value) => value === null) || references.some((value) => value === null)
+    || tolerancePercent === null || absoluteTolerance === null) return null;
+  const values = readings as number[];
+  const [resCal, uCal, resUut] = references as number[];
+  if (resCal <= 0 || uCal < 0 || resUut <= 0 || tolerancePercent < 0 || absoluteTolerance < 0) return null;
+  const mean = average(values);
+  const sd = values.length > 1 ? sampleStandardDeviation(values) : 0;
+  const ua = sd / Math.sqrt(values.length);
+  const variables: Record<string, number> = {
+    mean, setting, sd, n: values.length, ua, uCal, resCal, resUut,
+    tolerancePercent, absoluteTolerance,
+  };
+  try {
+    const numericResult = (expression: string) => {
+      const result = evaluateFormulaExpression(expression, variables);
+      if (typeof result !== 'number') throw new Error('Rumus angka menghasilkan nilai logika.');
+      return result;
+    };
+    const correction = numericResult(expressions.correction);
+    variables.correction = correction;
+    const u95 = numericResult(expressions.uncertainty);
+    variables.u95 = u95;
+    const tolerance = numericResult(expressions.tolerance);
+    variables.tolerance = tolerance;
+    const testValue = numericResult(expressions.testValue);
+    variables.testValue = testValue;
+    const pass = evaluateFormulaExpression(expressions.pass, variables);
+    if (typeof pass !== 'boolean' || u95 < 0 || tolerance < 0) return null;
+    return { setting, mean, correction, ua, u95, tolerance, testValue, pass, readings: values };
+  } catch {
+    return null;
+  }
+}
+
 function calculatePerformanceRow(row: PerformanceEntry, references: MeasurementReferences, allRows: PerformanceEntry[]): CalculatedPerformance | null {
+  if (row.formula === 'customExpression') return calculateCustomExpressionRow(row, references);
   if (row.formula.startsWith('workbook')) return calculateWorkbookPerformanceRow(row, references, allRows);
   const setting = number(row.setting);
   const parsedReadings = row.readings.map(number);
@@ -399,22 +519,6 @@ function calculateWorkbookPerformanceRow(row: PerformanceEntry, defaults: Measur
   };
 }
 
-const pumpFlowChannels = {
-  'Channel 1': {
-    flow: [-0.0044382463855594, -0.6893402184501818], occlusion: [0.0007131474999683357, -0.32276291846077326],
-    drift: [[5, 0.32], [10, 0.21], [50, 1.11], [100, 1.1], [300, 7.83]],
-  },
-  'Channel 2': {
-    flow: [-0.008489446490550527, -0.9974586654622964], occlusion: [0.0007349966213253538, -0.19390370130089055],
-    drift: [[5, 0.09], [10, 0.3], [50, 0.64], [100, 3.63], [300, 1.72]],
-  },
-  'Channel 3': {
-    flow: [-0.021639410741783483, 0.031476368066201355], occlusion: [0.000803253772109678, -0.02413768438734311],
-    drift: [[5, 0.32], [10, 0.02], [50, 0.77], [100, 0.35], [300, 7.83]],
-  },
-} as const;
-const pumpFlowCertificateU95 = [[10, 0.11], [25, 0.25625], [50, 0.5], [75, 0.75], [100, 1], [150, 1.55], [300, 3.2]] as const;
-
 function interpolateTable(value: number, table: readonly (readonly [number, number])[]): number | null {
   if (value < table[0][0] || value > table[table.length - 1][0]) return null;
   for (let index = 1; index < table.length; index += 1) {
@@ -425,57 +529,64 @@ function interpolateTable(value: number, table: readonly (readonly [number, numb
   return table[table.length - 1][1];
 }
 
-function expandedUncertainty(components: number[], reliabilities: number[]): number {
-  const variance = components.reduce((sum, component) => sum + component ** 2, 0);
-  const denominator = components.reduce((sum, component, index) => sum + component ** 4 / reliabilities[index], 0);
-  const effectiveDof = denominator ? variance ** 2 / denominator : Number.POSITIVE_INFINITY;
-  return Math.sqrt(variance) * studentTCritical95(effectiveDof);
-}
-
-function calculatePumpFlow(row: PerformanceEntry, channel: string): CalculatedPerformance | null {
+function calculatePumpFlow(row: PerformanceEntry, channel: string, config: NonNullable<Instrument['infusionPump']>, expressions?: Record<string, string>): CalculatedPerformance | null {
   const setting = number(row.setting);
   const readings = row.readings.map(number);
-  const profile = pumpFlowChannels[channel as keyof typeof pumpFlowChannels];
-  if (!profile || setting === null || setting <= 0 || readings.length !== 6 || readings.some((reading) => reading === null)) return null;
+  const profile = config.channels.find((item) => item.channel === channel);
+  if (!profile || setting === null || setting <= 0 || readings.length !== row.count || row.count < 1 || readings.some((reading) => reading === null)) return null;
   const values = readings as number[];
   const mean = average(values);
-  const drift = interpolateTable(setting, profile.drift);
-  const certificateU95 = interpolateTable(setting, pumpFlowCertificateU95);
+  const drift = interpolateTable(setting, profile.flowDrift);
+  const certificateU95 = interpolateTable(setting, config.flowCertificateU95);
   if (drift === null || certificateU95 === null) return null;
-  const correction = profile.flow[1] + profile.flow[0] * mean;
-  const correctedMean = mean + correction;
-  const error = correctedMean - setting;
+  const correction = numericFormula(expressions, 'pump.flowCorrection', 'intercept + slope * mean', { intercept: profile.flowIntercept, slope: profile.flowSlope, mean });
+  const correctedMean = correction === null ? null : numericFormula(expressions, 'pump.correctedMean', 'mean + correction', { mean, correction });
+  const error = correctedMean === null ? null : numericFormula(expressions, 'pump.error', 'correctedMean - setting', { correctedMean, setting });
   const standardDeviation = sampleStandardDeviation(values);
-  const ua = standardDeviation / Math.sqrt(3);
-  const u95 = expandedUncertainty([
-    0.01 / Math.sqrt(3), ua, drift / Math.sqrt(3), certificateU95 / 2,
-  ], [50, 2, 50, 50]);
-  const tolerance = 0.1;
-  const testValue = Math.abs(error / setting);
-  return { setting, mean, correction, correctedMean, error, ua, u95, tolerance, testValue, pass: testValue <= tolerance, readings: values };
+  const ua = numericFormula(expressions, 'pump.ua', 'standardDeviation / sqrt(3)', { standardDeviation });
+  const uResolution = numericFormula(expressions, 'pump.flowUResolution', 'flowResolution / sqrt(3)', { flowResolution: config.flowResolution });
+  const uDrift = numericFormula(expressions, 'pump.flowUDrift', 'drift / sqrt(3)', { drift });
+  const uCertificate = numericFormula(expressions, 'pump.flowUCertificate', 'certificateU95 / 2', { certificateU95 });
+  if (correction === null || correctedMean === null || error === null || ua === null || uResolution === null || uDrift === null || uCertificate === null) return null;
+  const components = [uResolution, ua, uDrift, uCertificate];
+  if (components.some((value) => value < 0)) return null;
+  const variance = components.reduce((sum, value) => sum + value ** 2, 0);
+  const denominator = components.reduce((sum, value, index) => sum + value ** 4 / config.flowDegreesOfFreedom[index], 0);
+  const k95 = studentTCritical95(denominator ? variance ** 2 / denominator : Number.POSITIVE_INFINITY);
+  const u95 = numericFormula(expressions, 'pump.u95', 'sqrt(uResolution^2 + ua^2 + uDrift^2 + uCertificate^2) * k95', { uResolution, ua, uDrift, uCertificate, k95 });
+  const tolerance = numericFormula(expressions, 'pump.flowTolerance', 'flowToleranceRatio', { flowToleranceRatio: config.flowToleranceRatio });
+  const testValue = numericFormula(expressions, 'pump.flowTestValue', 'abs(error / setting)', { error, setting });
+  if (u95 === null || tolerance === null || testValue === null || u95 < 0 || tolerance < 0) return null;
+  const pass = booleanFormula(expressions, 'pump.flowPass', 'testValue <= tolerance', { testValue, tolerance });
+  return pass === null ? null : { setting, mean, correction, correctedMean, error, ua, u95, tolerance, testValue, pass, readings: values };
 }
 
-function calculatePumpOcclusion(input: InfusionPumpData | undefined, limit: number): CalculationResult['pumpOcclusion'] {
+function calculatePumpOcclusion(input: InfusionPumpData | undefined, config: NonNullable<Instrument['infusionPump']>, expressions?: Record<string, string>): CalculationResult['pumpOcclusion'] {
   if (!input || input.occlusionReadings.length !== 6) return null;
-  const profile = pumpFlowChannels[input.channel as keyof typeof pumpFlowChannels];
+  const profile = config.channels.find((item) => item.channel === input.channel);
   const readings = input.occlusionReadings.map(number);
   if (!profile || readings.some((reading) => reading === null)) return null;
   const values = readings as number[];
   const mean = average(values);
-  const correction = profile.occlusion[1] + profile.occlusion[0] * mean;
-  const correctedMean = mean + correction;
-  const uncertaintyU95 = expandedUncertainty([
-    0.01 / Math.sqrt(3), sampleStandardDeviation(values) / Math.sqrt(3), 0.012 / 2,
-  ], [50, 2, 50]);
-  return { mean, correction, correctedMean, uncertaintyU95, limit, pass: mean <= limit, readings: values };
+  const correction = numericFormula(expressions, 'pump.occlusionCorrection', 'intercept + slope * mean', { intercept: profile.occlusionIntercept, slope: profile.occlusionSlope, mean });
+  const correctedMean = correction === null ? null : numericFormula(expressions, 'pump.occlusionCorrectedMean', 'mean + correction', { mean, correction });
+  const standardDeviation = sampleStandardDeviation(values);
+  const ua = numericFormula(expressions, 'pump.occlusionUa', 'standardDeviation / sqrt(3)', { standardDeviation });
+  const uResolution = numericFormula(expressions, 'pump.occlusionUResolution', 'occlusionResolution / sqrt(3)', { occlusionResolution: config.occlusionResolution });
+  const uDpm = numericFormula(expressions, 'pump.occlusionUDpm', 'occlusionDpmU95 / 2', { occlusionDpmU95: config.occlusionDpmU95 });
+  if (correction === null || correctedMean === null || ua === null || uResolution === null || uDpm === null) return null;
+  const components = [uResolution, ua, uDpm];
+  if (components.some((value) => value < 0)) return null;
+  const variance = components.reduce((sum, value) => sum + value ** 2, 0);
+  const denominator = components.reduce((sum, value, index) => sum + value ** 4 / config.occlusionDegreesOfFreedom[index], 0);
+  const k95 = studentTCritical95(denominator ? variance ** 2 / denominator : Number.POSITIVE_INFINITY);
+  const uncertaintyU95 = numericFormula(expressions, 'pump.occlusionU95', 'sqrt(uResolution^2 + ua^2 + uDpm^2) * k95', { uResolution, ua, uDpm, k95 });
+  const pass = booleanFormula(expressions, 'pump.occlusionPass', 'mean <= limit', { mean, limit: config.occlusionLimit });
+  if (uncertaintyU95 === null || uncertaintyU95 < 0 || pass === null) return null;
+  return { mean, correction, correctedMean, uncertaintyU95, limit: config.occlusionLimit, pass, readings: values };
 }
 
-const suctionDrift = {
-  up: [[0, 0.02], [100, 0.82], [200, 0.12], [300, 0.42], [400, 0.12], [500, 0.22], [600, 0.72]],
-  down: [[0, 0.02], [100, 0.52], [200, 0.08], [300, 0.32], [400, 0.12], [500, 0.42], [600, 0.72]],
-} as const;
-
-function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, data: SuctionPumpData | undefined, standardValid: boolean): SuctionPumpResult {
+function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, data: SuctionPumpData | undefined, standardValid: boolean, expressions?: Record<string, string>): SuctionPumpResult {
   const legacy = Boolean(data?.pressureReadings.some((point) => !config.pressurePoints.includes(point.setting)));
   const settings = legacy ? (data?.pressureReadings ?? []).map((point) => point.setting) : config.pressurePoints;
   const repeatCount = legacy ? 3 : 6;
@@ -486,68 +597,85 @@ function calculateSuctionPump(config: NonNullable<Instrument['suctionPump']>, da
       if (!standardValid || readings.length !== repeatCount || readings.some((value) => value === null)) return null;
       const values = readings as number[];
       const mean = average(values);
-      const signedMean = -mean;
-      const drift = interpolateTable(Math.abs(setting), suctionDrift[direction]);
+      const signedMean = numericFormula(expressions, 'suction.signedMean', '-mean', { mean });
+      const drift = interpolateTable(Math.abs(setting), direction === 'up' ? config.driftUp : config.driftDown);
       if (drift === null) return null;
-      const slope = direction === 'up' ? 0.003441823675411558 : 0.003504637540282135;
-      const intercept = direction === 'up' ? 0.2940836678821175 : 0.3211573395802835;
-      const correction = intercept + slope * signedMean;
-      const correctedMean = signedMean + correction;
-      const error = correctedMean - setting;
-      const ua = sampleStandardDeviation(values) / Math.sqrt(values.length);
-      const uncertaintyU95 = expandedUncertainty([
-        (20 * 0.5 / 3) / Math.sqrt(6), ua, drift / Math.sqrt(3), 0.31 / 2,
-      ], [50, 2, 50, 50]);
-      return { readings: values, mean, correction, correctedMean, error, uncertaintyU95, pass: Math.abs(error / setting) <= 0.1 };
+      if (signedMean === null) return null;
+      const slope = direction === 'up' ? config.slopeUp : config.slopeDown;
+      const intercept = direction === 'up' ? config.interceptUp : config.interceptDown;
+      const correction = numericFormula(expressions, 'suction.correction', 'intercept + slope * signedMean', { intercept, slope, signedMean });
+      const correctedMean = correction === null ? null : numericFormula(expressions, 'suction.correctedMean', 'signedMean + correction', { signedMean, correction });
+      const error = correctedMean === null ? null : numericFormula(expressions, 'suction.error', 'correctedMean - setting', { correctedMean, setting });
+      const standardDeviation = sampleStandardDeviation(values);
+      const ua = numericFormula(expressions, 'suction.ua', 'standardDeviation / sqrt(n)', { standardDeviation, n: values.length });
+      const uResolution = numericFormula(expressions, 'suction.uResolution', '(meterResolution * 0.5 / 3) / sqrt(6)', { meterResolution: config.meterResolution });
+      const uDrift = numericFormula(expressions, 'suction.uDrift', 'drift / sqrt(3)', { drift });
+      const uDpm = numericFormula(expressions, 'suction.uDpm', 'meterU95 / 2', { meterU95: config.meterU95 });
+      if (correction === null || correctedMean === null || error === null || ua === null || uResolution === null || uDrift === null || uDpm === null) return null;
+      const components = [uResolution, ua, uDrift, uDpm];
+      if (components.some((value) => value < 0)) return null;
+      const variance = components.reduce((sum, value) => sum + value ** 2, 0);
+      const denominator = components.reduce((sum, value, index) => sum + value ** 4 / config.degreesOfFreedom[index], 0);
+      const k95 = studentTCritical95(denominator ? variance ** 2 / denominator : Number.POSITIVE_INFINITY);
+      const uncertaintyU95 = numericFormula(expressions, 'suction.u95', 'sqrt(uResolution^2 + ua^2 + uDrift^2 + uDpm^2) * k95', { uResolution, ua, uDrift, uDpm, k95 });
+      const pass = booleanFormula(expressions, 'suction.pressurePass', 'abs(error / setting) <= toleranceRatio', { error, setting, toleranceRatio: config.pressureToleranceRatio });
+      if (uncertaintyU95 === null || uncertaintyU95 < 0 || pass === null) return null;
+      return { readings: values, mean, correction, correctedMean, error, uncertaintyU95, pass };
     };
     return { setting, up: calculateDirection('up'), down: calculateDirection('down') };
   });
   const maximumVacuumReading = number(data?.maximumVacuumReading);
   const maximumVacuumSeconds = number(data?.maximumVacuumSeconds);
-  const complete = standardValid && maximumVacuumReading !== null && maximumVacuumSeconds !== null
+  const maximumVacuumMagnitude = maximumVacuumReading === null ? null : Math.abs(maximumVacuumReading);
+  const maximumVacuumReadingPass = maximumVacuumMagnitude === null ? null : legacy
+    ? booleanFormula(expressions, 'suction.legacyVacuumPass', 'vacuumMagnitude >= legacyMinimumVacuum', {
+      vacuumMagnitude: maximumVacuumMagnitude, legacyMinimumVacuum: config.legacyMinimumVacuumMmHg,
+    })
+    : booleanFormula(expressions, 'suction.maximumVacuumPass', 'vacuumMagnitude >= minimumVacuum && vacuumMagnitude <= maximumVacuum', {
+      vacuumMagnitude: maximumVacuumMagnitude, minimumVacuum: config.minimumVacuumMmHg, maximumVacuum: config.maximumVacuumMmHg,
+    });
+  const maximumVacuumPass = maximumVacuumSeconds === null ? null : booleanFormula(expressions, 'suction.maximumTimePass', 'seconds <= maximumSeconds', {
+    seconds: maximumVacuumSeconds, maximumSeconds: config.maximumVacuumSeconds,
+  });
+  const complete = standardValid && maximumVacuumReading !== null && maximumVacuumReadingPass !== null
+    && maximumVacuumSeconds !== null && maximumVacuumPass !== null
     && pressureReadings.every((point) => point.up !== null && point.down !== null);
   return {
     pressureReadings,
     maximumVacuumReading,
-    maximumVacuumReadingPass: maximumVacuumReading === null ? null : legacy
-      ? Math.abs(maximumVacuumReading) >= 300
-      : Math.abs(maximumVacuumReading) >= config.minimumVacuumMmHg && Math.abs(maximumVacuumReading) <= config.maximumVacuumMmHg,
+    maximumVacuumReadingPass,
     maximumVacuumSeconds,
-    maximumVacuumPass: maximumVacuumSeconds === null ? null : maximumVacuumSeconds <= 10,
+    maximumVacuumPass,
     complete,
   };
 }
 
-const earthLimits = [0.3, 0.2, 0.3, 0.5];
-const leakageLimits = [1000, 500, 500, 100];
-
-function atLeast(value: string, threshold: number): boolean {
-  const numeric = number(value);
-  if (numeric !== null) return numeric >= threshold;
-  const greaterThan = String(value).match(/^>\s*(\d+(?:[.,]\d+)?)$/);
-  return Boolean(greaterThan && Number(greaterThan[1].replace(',', '.')) >= threshold) || /^ol$/i.test(String(value).trim());
-}
-
-function calculateSafety(safety: SafetyData): SafetyResult {
+function calculateSafety(safety: SafetyData, config = defaultElectricalSafetyConfig, expressions?: Record<string, string>): SafetyResult {
   const voltage = number(safety.voltage);
   const earth = number(safety.earthResistance);
   const equipmentLeakage = number(safety.equipmentLeakage);
   const appliedLeakage = number(safety.appliedLeakage);
+  const rawInsulation = String(safety.insulationResistance ?? '').trim();
+  const insulationMatch = rawInsulation.match(/^>\s*(\d+(?:[.,]\d+)?)$/);
+  const insulationResistance = number(rawInsulation) ?? (insulationMatch ? Number(insulationMatch[1].replace(',', '.')) : /^ol$/i.test(rawInsulation) ? Number.MAX_SAFE_INTEGER : null);
   const earthType = Number(safety.earthType) - 1;
   const leakageType = Number(safety.leakageType) - 1;
+  const earthLimit = config.earthResistanceLimitsOhm[earthType];
+  const leakageLimit = config.leakageCurrentLimitsMa[leakageType];
   const checks: SafetyCheck[] = [
-    { label: 'Tegangan jala-jala', result: voltage === null ? null : voltage >= 198 && voltage <= 242, measured: safety.voltage, limit: '198–242 V' },
-    { label: 'Resistansi pembumian protektif', result: earth === null ? null : earth <= earthLimits[earthType], measured: safety.earthResistance, limit: `${earthLimits[earthType]} Ω` },
-    { label: 'Arus bocor peralatan', result: equipmentLeakage === null ? null : equipmentLeakage <= leakageLimits[leakageType], measured: safety.equipmentLeakage, limit: `${leakageLimits[leakageType]} mA` },
-    { label: 'Arus bocor bagian diaplikasikan', result: safety.appliedLeakageNA ? true : appliedLeakage === null ? null : appliedLeakage <= 50, measured: safety.appliedLeakageNA ? 'Tidak berlaku' : safety.appliedLeakage, limit: '50 mA' },
-    { label: 'Resistansi isolasi', result: safety.insulationResistance ? atLeast(safety.insulationResistance, 2) : null, measured: safety.insulationResistance, limit: '≥ 2 MΩ' },
+    { label: 'Tegangan jala-jala', result: voltage === null ? null : booleanFormula(expressions, 'safety.voltagePass', 'voltage >= voltageMinimum && voltage <= voltageMaximum', { voltage, voltageMinimum: config.voltageMinimumV, voltageMaximum: config.voltageMaximumV }), measured: safety.voltage, limit: `${config.voltageMinimumV}–${config.voltageMaximumV} V` },
+    { label: 'Resistansi pembumian protektif', result: earth === null ? null : booleanFormula(expressions, 'safety.earthPass', 'earth <= earthLimit', { earth, earthLimit }), measured: safety.earthResistance, limit: `${earthLimit} Ω` },
+    { label: 'Arus bocor peralatan', result: equipmentLeakage === null ? null : booleanFormula(expressions, 'safety.equipmentLeakagePass', 'equipmentLeakage <= leakageLimit', { equipmentLeakage, leakageLimit }), measured: safety.equipmentLeakage, limit: `${leakageLimit} mA` },
+    { label: 'Arus bocor bagian diaplikasikan', result: safety.appliedLeakageNA ? booleanFormula(expressions, 'safety.appliedLeakagePass', 'appliedLeakageNA == 1 || appliedLeakage <= appliedLeakageLimit', { appliedLeakageNA: 1, appliedLeakage: appliedLeakage ?? 0, appliedLeakageLimit: config.appliedLeakageLimitMa }) : appliedLeakage === null ? null : booleanFormula(expressions, 'safety.appliedLeakagePass', 'appliedLeakageNA == 1 || appliedLeakage <= appliedLeakageLimit', { appliedLeakageNA: 0, appliedLeakage, appliedLeakageLimit: config.appliedLeakageLimitMa }), measured: safety.appliedLeakageNA ? 'Tidak berlaku' : safety.appliedLeakage, limit: `${config.appliedLeakageLimitMa} mA` },
+    { label: 'Resistansi isolasi', result: insulationResistance === null ? null : booleanFormula(expressions, 'safety.insulationPass', 'insulationResistance >= insulationMinimum', { insulationResistance, insulationMinimum: config.insulationMinimumMOhm }), measured: safety.insulationResistance, limit: `≥ ${config.insulationMinimumMOhm} MΩ` },
   ];
   const complete = checks.every((check) => check.result !== null);
   const passed = checks.filter((check) => check.result === true).length;
+  const score = complete ? numericFormula(expressions, 'safety.score', 'passedCount * scorePerCheck', { passedCount: passed, scorePerCheck: config.scorePerPassedCheck }) : null;
   return {
     checks,
-    complete,
-    score: complete ? passed * 8 : null,
+    complete: complete && score !== null && score >= 0 && score <= 100,
+    score: score !== null && score >= 0 && score <= 100 ? score : null,
   };
 }
 
@@ -569,19 +697,23 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const selectedPumpAnalyzer = data.selectedDevices?.find((device) => device.name === 'Infusion Device Analyzer');
   const pumpAnalyzerValid = data.selectedDevices === undefined || selectedPumpAnalyzer?.serial === pumpAnalyzerSerial;
   const sphygmomanometer = calculationInstrument.sphygmomanometer
-    ? calculateSphygmomanometer(calculationInstrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid)
+    ? calculateSphygmomanometer(calculationInstrument.sphygmomanometer, data.sphygmomanometer, dpmStandardValid, calculationInstrument.formulaExpressions)
     : null;
   const performance = data.performance.map((row) => ({
     ...row,
     result: row.formula === 'infusionFlow'
-      ? pumpAnalyzerValid ? calculatePumpFlow(row, data.infusionPump?.channel ?? '') : null
+      ? pumpAnalyzerValid && calculationInstrument.infusionPump
+        ? calculatePumpFlow(row, data.infusionPump?.channel ?? '', calculationInstrument.infusionPump, calculationInstrument.formulaExpressions)
+        : null
       : calculatePerformanceRow(row, data.references, data.performance),
   }));
   const infusionPump = templateId === 'infusion-pump' || templateId === 'syringe-pump';
-  const pumpOcclusion = infusionPump && pumpAnalyzerValid ? calculatePumpOcclusion(data.infusionPump, templateId === 'syringe-pump' ? 21 : 20) : null;
+  const pumpOcclusion = infusionPump && pumpAnalyzerValid && calculationInstrument.infusionPump
+    ? calculatePumpOcclusion(data.infusionPump, calculationInstrument.infusionPump, calculationInstrument.formulaExpressions)
+    : null;
   const suctionDpmSerial = instrument.suctionPump ? dpmSerial : undefined;
   const suctionDpmValid = data.selectedDevices === undefined || Boolean(selectedDpm && selectedDpm.serial === suctionDpmSerial);
-  const suctionPump = instrument.suctionPump ? calculateSuctionPump(instrument.suctionPump, data.suctionPump, suctionDpmValid) : null;
+  const suctionPump = instrument.suctionPump ? calculateSuctionPump(instrument.suctionPump, data.suctionPump, suctionDpmValid, instrument.formulaExpressions) : null;
   const inspections = data.inspections.map((item) => ({
     ...item,
     complete: Boolean(item.physical && item.function),
@@ -595,9 +727,11 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     : null;
   const physicalScore = inspectionRate === null
     ? null
-    : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight : inspectionRate >= 70 ? instrument.score.physicalWeight : 0;
-  const safety = instrument.electricalSafety || ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId) ? calculateSafety(data.safety) : null;
-  const performanceComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete
+    : weighing ? (inspectionRate / 100) * instrument.score.physicalWeight
+      : inspectionRate >= (instrument.score.physicalThreshold ?? 70) ? instrument.score.physicalWeight : 0;
+  const safety = instrument.electricalSafety || instrument.electricalSafetyConfig || ['centrifuge', 'infusion-pump', 'syringe-pump', 'suction-pump'].includes(templateId)
+    ? calculateSafety(data.safety, instrument.electricalSafetyConfig, instrument.formulaExpressions) : null;
+  const performanceInputsComplete = weighing ? weighing.complete : sphygmomanometer ? sphygmomanometer.complete
     : suctionPump ? suctionPump.complete
       : infusionPump ? performance.length > 0 && performance.every((row) => row.result !== null) && pumpOcclusion !== null
         : performance.length > 0 && performance.every((row) => row.result !== null);
@@ -606,19 +740,36 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
   const performancePassCount = scoredPerformance.reduce((sum, row) => sum + (row.result
     ? row.result.standardPass === undefined ? Number(row.result.pass) : Number(row.result.uutPass) + Number(row.result.standardPass)
     : 0), 0);
+  const sphygPerformanceRate = sphygmomanometer?.complete ? numericFormula(instrument.formulaExpressions, 'sphyg.performanceRate', '((leakagePassed * 30 + deflationPassed * 30 + upPassCount * 15 / pressurePointCount + downPassCount * 15 / pressurePointCount) / 90) * 100', {
+    leakagePassed: Number(sphygmomanometer.leakageDrop.pass),
+    deflationPassed: Number(sphygmomanometer.rapidDeflationSeconds.pass),
+    upPassCount: sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.up.pass), 0),
+    downPassCount: sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.down.pass), 0),
+    pressurePointCount: sphygmomanometer.pressureReadings.length,
+  }) : null;
+  const pumpFlowRate = performanceInputsComplete && infusionPump ? performance.filter((row) => row.result?.pass).length / performance.length * 100 : null;
+  const pumpPerformanceRate = pumpFlowRate === null || pumpOcclusion?.pass === null || pumpOcclusion?.pass === undefined ? null
+    : numericFormula(instrument.formulaExpressions, 'pump.performanceRate', '(flowPassRate + occlusionPassed * 100) / 2', { flowPassRate: pumpFlowRate, occlusionPassed: Number(pumpOcclusion.pass) });
+  const suctionPressurePassCount = suctionPump?.pressureReadings.reduce((sum, point) => sum + Number(point.up?.pass) + Number(point.down?.pass), 0) ?? 0;
+  const suctionPerformanceRate = performanceInputsComplete && suctionPump ? numericFormula(instrument.formulaExpressions, 'suction.performanceRate', 'pressurePassCount / (pressurePointCount * 2) * 100', {
+    pressurePassCount: suctionPressurePassCount, pressurePointCount: suctionPump.pressureReadings.length,
+  }) : null;
+  const suctionPerformancePass = performanceInputsComplete && suctionPump && suctionPerformanceRate !== null
+    ? booleanFormula(instrument.formulaExpressions, 'suction.performancePass', 'pressureRate == 100 && vacuumReadingPassed == 1 && vacuumTimePassed == 1', {
+      pressureRate: suctionPerformanceRate,
+      vacuumReadingPassed: Number(suctionPump.maximumVacuumReadingPass),
+      vacuumTimePassed: Number(suctionPump.maximumVacuumPass),
+    }) : null;
+  const performanceComplete = performanceInputsComplete && (sphygmomanometer ? sphygPerformanceRate !== null
+    : infusionPump ? pumpPerformanceRate !== null
+      : suctionPump ? suctionPerformanceRate !== null && suctionPerformancePass !== null
+        : true);
   const performanceRate = weighing
     ? weighing.pass === null ? null : weighing.pass ? 100 : 0
-    : sphygmomanometer
-      ? sphygmomanometer.complete
-        ? ((Number(sphygmomanometer.leakageDrop.pass) * 30
-          + Number(sphygmomanometer.rapidDeflationSeconds.pass) * 30
-          + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.up.pass), 0) * 15 / 6
-          + sphygmomanometer.pressureReadings.reduce((sum, point) => sum + Number(point.down.pass), 0) * 15 / 6) / 90) * 100
-        : null
+    : sphygmomanometer ? sphygPerformanceRate
       : infusionPump
-        ? performanceComplete ? ((performance.filter((row) => row.result?.pass).length / performance.length) * 100 + Number(pumpOcclusion?.pass) * 100) / 2 : null
-      : suctionPump
-        ? performanceComplete ? (suctionPump.pressureReadings.reduce((sum, point) => sum + Number(point.up?.pass) + Number(point.down?.pass), 0) / (suctionPump.pressureReadings.length * 2)) * 100 : null
+        ? pumpPerformanceRate
+      : suctionPump ? suctionPerformanceRate
     : performanceComplete && performanceOutcomeCount > 0 ? (performancePassCount / performanceOutcomeCount) * 100 : null;
   const performanceScore = weighing
     ? weighing.pass === null ? null : weighing.pass ? instrument.score.performanceWeight : 0
@@ -627,7 +778,7 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     : infusionPump
       ? performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0
     : suctionPump
-      ? performanceComplete ? performanceRate === 100 && suctionPump.maximumVacuumPass ? instrument.score.performanceWeight : 0 : null
+      ? suctionPerformancePass === null ? null : suctionPerformancePass ? instrument.score.performanceWeight : 0
     : instrument.score.performanceWeight === 0 ? performanceComplete ? 0 : null
       : performanceRate === null ? null : performanceRate >= instrument.score.performanceThreshold ? instrument.score.performanceWeight : 0;
   const safetyScore = safety ? safety.score : 0;
@@ -745,6 +896,6 @@ export function calculateRecord(instrument: Instrument, data: CalibrationData): 
     score,
     missing: [...new Set(missing)],
     complete: missing.length === 0,
-    status: missing.length ? 'BELUM LENGKAP' : score !== null && score >= 70 ? 'LAIK PAKAI DAN AMAN UNTUK DIGUNAKAN' : 'TIDAK LAIK PAKAI',
+    status: missing.length ? 'BELUM LENGKAP' : score !== null && score >= (instrument.score.overallPassThreshold ?? 70) ? 'LAIK PAKAI DAN AMAN UNTUK DIGUNAKAN' : 'TIDAK LAIK PAKAI',
   };
 }
